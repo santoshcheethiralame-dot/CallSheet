@@ -1,3 +1,6 @@
+from unittest.mock import patch
+
+import pytest
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
 from callsheet.render import RenderResult
@@ -10,6 +13,17 @@ def _result(shot="SH001", succeeded=True, duration_ms=1234.0) -> RenderResult:
         succeeded=succeeded, exit_code=0 if succeeded else 1,
         stderr="" if succeeded else "Error: out of memory",
     )
+
+
+def _duration_points(reader):
+    return [
+        point
+        for rm in reader.get_metrics_data().resource_metrics
+        for sm in rm.scope_metrics
+        for metric in sm.metrics
+        if metric.name == "render.frame.duration"
+        for point in metric.data.data_points
+    ]
 
 
 def test_record_render_emits_duration_histogram():
@@ -65,3 +79,36 @@ def test_failed_render_is_labelled_failure():
         for point in metric.data.data_points
     ]
     assert dict(points[0].attributes)["outcome"] == "failure"
+
+
+def test_with_block_yields_the_telemetry_and_records():
+    reader = InMemoryMetricReader()
+
+    with Telemetry.for_testing(reader) as telemetry:
+        assert isinstance(telemetry, Telemetry)
+        telemetry.record_render(_result(), sequence="SEQ01", quality="proxy")
+        points = _duration_points(reader)
+
+    assert sum(point.count for point in points) == 1
+
+
+def test_leaving_the_block_flushes():
+    telemetry = Telemetry.for_testing(InMemoryMetricReader())
+
+    with patch.object(telemetry, "shutdown") as shutdown:
+        with telemetry:
+            pass
+
+    shutdown.assert_called_once_with()
+
+
+def test_shutdown_runs_even_when_the_block_raises():
+    """A crash is exactly when the telemetry matters most, so it must still flush."""
+    telemetry = Telemetry.for_testing(InMemoryMetricReader())
+
+    with patch.object(telemetry, "shutdown") as shutdown:
+        with pytest.raises(RuntimeError, match="render crashed"):
+            with telemetry:
+                raise RuntimeError("render crashed")
+
+    shutdown.assert_called_once_with()

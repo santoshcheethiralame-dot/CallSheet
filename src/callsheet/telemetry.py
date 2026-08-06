@@ -14,7 +14,13 @@ SERVICE_NAME = "callsheet-worker"
 
 
 class Telemetry:
-    """Owns the meter provider and the instruments recorded against it."""
+    """Owns the meter provider and the instruments recorded against it.
+
+    Use it as a context manager so the flush cannot be forgotten:
+
+        with Telemetry.for_grafana(config) as telemetry:
+            run_manifest(config, telemetry, "scenes/manifest.json")
+    """
 
     def __init__(self, provider: MeterProvider) -> None:
         self._provider = provider
@@ -39,6 +45,17 @@ class Telemetry:
     def for_testing(cls, reader) -> "Telemetry":
         resource = Resource.create({"service.name": SERVICE_NAME})
         return cls(MeterProvider(resource=resource, metric_readers=[reader]))
+
+    def __enter__(self) -> "Telemetry":
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        """Flush on the way out, including when the body raised.
+
+        Nothing reaches Grafana Cloud until shutdown() runs, and a crashed
+        render is precisely when its telemetry is worth keeping.
+        """
+        self.shutdown()
 
     def record_render(self, result: RenderResult, sequence: str, quality: str) -> None:
         self._duration.record(

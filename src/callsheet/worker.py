@@ -21,7 +21,7 @@ def run_manifest(
     """Render every frame of every shot in the manifest, recording each one.
 
     The caller owns the Telemetry object's lifetime: nothing is flushed to
-    Grafana Cloud until Telemetry.shutdown() runs.
+    Grafana Cloud until it is shut down, so hold it in a `with` block.
     """
     with open(manifest_path, encoding="utf-8") as handle:
         manifest = json.load(handle)
