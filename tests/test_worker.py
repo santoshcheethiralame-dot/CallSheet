@@ -14,6 +14,7 @@ CONFIG = Config(
     otlp_endpoint="https://otlp.example/otlp",
     otlp_auth="aGVsbG8=",
     blender_path="blender.exe",
+    gemini_api_key="AIza_test",
 )
 
 

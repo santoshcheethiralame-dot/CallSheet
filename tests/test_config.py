@@ -7,6 +7,7 @@ FULL_ENV = {
     "OTLP_ENDPOINT": "https://otlp-gateway-prod.grafana.net/otlp",
     "OTLP_AUTH": "aGVsbG8=",
     "BLENDER_PATH": "C:/Program Files/Blender Foundation/Blender 4.2/blender.exe",
+    "GEMINI_API_KEY": "AIza_test",
 }
 
 
@@ -17,6 +18,7 @@ def test_from_env_reads_every_field():
     assert config.otlp_endpoint == "https://otlp-gateway-prod.grafana.net/otlp"
     assert config.otlp_auth == "aGVsbG8="
     assert config.blender_path.endswith("blender.exe")
+    assert config.gemini_api_key == "AIza_test"
 
 
 def test_from_env_strips_trailing_slash_on_grafana_url():
@@ -32,6 +34,12 @@ def test_from_env_lists_every_missing_key_at_once():
     assert "OTLP_ENDPOINT" in message
     assert "OTLP_AUTH" in message
     assert "BLENDER_PATH" in message
+
+
+def test_gemini_api_key_is_required():
+    with pytest.raises(ConfigError) as excinfo:
+        Config.from_env({})
+    assert "GEMINI_API_KEY" in str(excinfo.value)
 
 
 def test_mcp_grafana_path_defaults_to_the_bare_command():

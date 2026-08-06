@@ -16,6 +16,7 @@ _FIELDS = {
     "otlp_endpoint": "OTLP_ENDPOINT",
     "otlp_auth": "OTLP_AUTH",
     "blender_path": "BLENDER_PATH",
+    "gemini_api_key": "GEMINI_API_KEY",
 }
 
 # Optional settings, mapped to their default. Absence must never block startup.
@@ -31,6 +32,9 @@ class Config:
     otlp_endpoint: str
     otlp_auth: str
     blender_path: str
+    # Must stay above the defaulted field below: a dataclass rejects a
+    # non-default argument following a defaulted one, at import time.
+    gemini_api_key: str
     mcp_grafana_path: str = "mcp-grafana"
 
     @classmethod
