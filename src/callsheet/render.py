@@ -23,10 +23,14 @@ def render_frame(
     shot: str,
     frame: int,
     out_dir: str,
-    samples: int,
     timeout_s: int = 600,
 ) -> RenderResult:
-    """Render one frame in Blender's background mode."""
+    """Render one frame in Blender's background mode.
+
+    Sample count is baked into the .blend by scenes/make_scenes.py, so it is not
+    a parameter here. Phase 2 introduces proxy/final quality tiers by overriding
+    bpy.context.scene.cycles.samples through Blender's --python-expr flag.
+    """
     command = [
         blender_path,
         "-b",

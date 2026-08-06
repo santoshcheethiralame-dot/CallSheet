@@ -220,6 +220,11 @@ Integration tests read credentials from `os.environ`, but nothing loads `.env`
 for them — only the spike script does. Without this, every integration test
 fails with a misleading `ConfigError` on a machine that is correctly configured.
 
+**Order matters:** create this file *after* `pip install -e ".[dev]"`, not
+before. It imports `dotenv`, so if it exists during an earlier "verify the test
+fails" run, pytest dies on `ModuleNotFoundError: dotenv` instead of the expected
+failure, and the TDD step gives a misleading signal.
+
 ```python
 # tests/conftest.py
 """Load .env so integration tests see the same credentials the spike script does."""
@@ -251,7 +256,13 @@ git commit -m "Add project scaffold, Apache-2.0 license, and fail-fast config"
 
 **Interfaces:**
 - Consumes: `Config.blender_path` from Task 1
-- Produces: `RenderResult` dataclass with fields `shot: str`, `frame: int`, `duration_ms: float`, `succeeded: bool`, `exit_code: int`, `stderr: str`; and `render_frame(blender_path: str, scene: str, shot: str, frame: int, out_dir: str, samples: int) -> RenderResult`. Never raises on a render failure — a failed render is data, returned with `succeeded=False`.
+- Produces: `RenderResult` dataclass with fields `shot: str`, `frame: int`, `duration_ms: float`, `succeeded: bool`, `exit_code: int`, `stderr: str`; and `render_frame(blender_path: str, scene: str, shot: str, frame: int, out_dir: str, timeout_s: int = 600) -> RenderResult`. Never raises on a render failure — a failed render is data, returned with `succeeded=False`.
+
+**No `samples` parameter.** Sample count is baked into the `.blend` by Task 3's
+generator, so passing it here would be a lie in the signature. Phase 2
+introduces proxy/final quality tiers by overriding
+`bpy.context.scene.cycles.samples` through Blender's `--python-expr` flag, which
+is the point at which a quality argument becomes real.
 
 Failures are a product feature here, not an exception. The agent's whole job in
 later phases is reacting to them, so they must survive as structured values.
@@ -270,19 +281,19 @@ def _completed(returncode: int, stderr: str = "") -> subprocess.CompletedProcess
     return subprocess.CompletedProcess(args=[], returncode=returncode, stdout="", stderr=stderr)
 
 
-def test_successful_render_returns_positive_duration():
+def test_successful_render_reports_the_shot_and_frame():
     with patch("subprocess.run", return_value=_completed(0)):
-        result = render_frame("blender.exe", "scenes/a.blend", "SH001", 1, "out", 64)
+        result = render_frame("blender.exe", "scenes/a.blend", "SH001", 1, "out")
     assert result.succeeded is True
     assert result.exit_code == 0
-    assert result.duration_ms >= 0
+    assert isinstance(result.duration_ms, float)
     assert result.shot == "SH001"
     assert result.frame == 1
 
 
 def test_failed_render_is_returned_not_raised():
     with patch("subprocess.run", return_value=_completed(1, "Error: out of memory")):
-        result = render_frame("blender.exe", "scenes/a.blend", "SH002", 7, "out", 64)
+        result = render_frame("blender.exe", "scenes/a.blend", "SH002", 7, "out")
     assert result.succeeded is False
     assert result.exit_code == 1
     assert "out of memory" in result.stderr
@@ -290,18 +301,17 @@ def test_failed_render_is_returned_not_raised():
 
 def test_command_passes_background_and_frame_flags():
     with patch("subprocess.run", return_value=_completed(0)) as run:
-        render_frame("blender.exe", "scenes/a.blend", "SH003", 12, "out", 64)
+        render_frame("blender.exe", "scenes/a.blend", "SH003", 12, "out")
     command = run.call_args[0][0]
     assert command[0] == "blender.exe"
     assert "-b" in command
     assert "scenes/a.blend" in command
-    assert "-f" in command
-    assert "12" in command
+    assert command[command.index("-f") + 1] == "12", "frame number must follow -f"
 
 
 def test_timeout_is_reported_as_failure():
     with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="blender", timeout=1)):
-        result = render_frame("blender.exe", "scenes/a.blend", "SH004", 1, "out", 64, timeout_s=1)
+        result = render_frame("blender.exe", "scenes/a.blend", "SH004", 1, "out", timeout_s=1)
     assert result.succeeded is False
     assert result.exit_code == -1
     assert "timed out" in result.stderr.lower()
@@ -341,10 +351,14 @@ def render_frame(
     shot: str,
     frame: int,
     out_dir: str,
-    samples: int,
     timeout_s: int = 600,
 ) -> RenderResult:
-    """Render one frame in Blender's background mode."""
+    """Render one frame in Blender's background mode.
+
+    Sample count is baked into the .blend by scenes/make_scenes.py, so it is not
+    a parameter here. Phase 2 introduces proxy/final quality tiers by overriding
+    bpy.context.scene.cycles.samples through Blender's --python-expr flag.
+    """
     command = [
         blender_path,
         "-b",
@@ -517,7 +531,7 @@ def test_render_cost_actually_increases():
         manifest = json.load(handle)
 
     durations = [
-        render_frame(config.blender_path, entry["scene"], entry["shot"], 1, "out", entry["samples"]).duration_ms
+        render_frame(config.blender_path, entry["scene"], entry["shot"], 1, "out").duration_ms
         for entry in manifest
     ]
     assert durations[0] < durations[-1], f"expected increasing cost, got {durations}"
@@ -828,7 +842,6 @@ def run_manifest(
                 shot=entry["shot"],
                 frame=frame,
                 out_dir=out_dir,
-                samples=entry["samples"],
             )
             telemetry.record_render(result, sequence=SEQUENCE, quality=quality)
             results.append(result)
@@ -862,6 +875,13 @@ git commit -m "Add instrumented worker rendering a shot manifest"
 **This is the partner requirement.** The rules check for a live `mcp-grafana`
 connection in code, so this file is the single most compliance-critical unit in
 the project.
+
+> **Verify the SDK API before writing this task.** Task 1 resolved `mcp` to
+> **2.0.0**, not the 1.x line the code below was written against. Run
+> `python -c "import mcp; print(mcp.__version__); print(dir(mcp))"` and check
+> that `ClientSession`, `StdioServerParameters` and `mcp.client.stdio.stdio_client`
+> still exist with these signatures. If 2.0 moved them, fix the imports here
+> before implementing — do not assume the code below compiles.
 
 - [ ] **Step 1: Install `mcp-grafana`**
 
@@ -1182,5 +1202,5 @@ sets how fast a scheduling round can possibly react.
 - [ ] `python -m pytest -m integration` passes locally
 - [ ] `python scripts/spike_end_to_end.py` exits 0
 - [ ] `LICENSE` is present and Apache-2.0
-- [ ] No secrets committed — `git log -p | Select-String "glsa_"` finds nothing
+- [ ] No secrets committed — `git log -p | Select-String "glsa_" | Select-String -NotMatch "glsa_abc"` finds nothing (the literal `glsa_abc` is the dummy token used in tests and in this plan, so a bare `glsa_` search always matches)
 - [ ] Phase 1 findings recorded in the design doc
