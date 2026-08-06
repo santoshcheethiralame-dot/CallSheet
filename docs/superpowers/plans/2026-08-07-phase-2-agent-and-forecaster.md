@@ -925,12 +925,30 @@ def test_annotation_is_tagged_for_retrieval():
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_writes_a_real_annotation_to_grafana():
+async def test_writes_a_real_annotation_and_reads_it_back():
+    """Uses the real clock deliberately.
+
+    A fixed epoch of 1_000_000 dates the annotation to January 1970, where
+    Grafana's default time range will never show it — a successful write would
+    look like a failure. Determinism belongs in the pure tests above; this one
+    needs to land somewhere a human can actually see it.
+    """
+    import time
+
     from callsheet.annotate import write_annotation
     from callsheet.config import Config
+    from callsheet.grafana_mcp import call_tool
 
-    result = await write_annotation(Config.from_env(os.environ), DECISION, now_epoch_s=1_000_000)
+    config = Config.from_env(os.environ)
+    now = int(time.time())
+
+    result = await write_annotation(config, DECISION, now_epoch_s=now)
     assert "error" not in result.lower(), result
+
+    # Read it back by tag. `create_annotation` can accept and discard a
+    # malformed payload, so a non-error response is not evidence of anything.
+    found = await call_tool(config, "get_annotations", {"tags": ["callsheet"], "matchAny": False})
+    assert DECISION.summary in found, f"annotation not retrievable: {found[:400]}"
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -1076,6 +1094,23 @@ async def test_a_model_failure_does_not_abort_the_round():
     assert result.degraded_reason is not None
     assert "quota" in result.degraded_reason.lower()
     assert result.forecasts, "forecasts are still valid without the model"
+
+
+@pytest.mark.asyncio
+async def test_an_annotation_failure_does_not_discard_the_decision():
+    """A Grafana blip must not throw away work that already succeeded."""
+    state = FarmState(mean_frame_ms={"SH001": 60_000.0}, frames_done={})
+    review = Review("R", NOW + 10, ["SH001"])
+    decision = Decision("late", [Action("SH001", "downgrade", "will miss")])
+
+    with patch("callsheet.round.read_farm_state", AsyncMock(return_value=state)), \
+         patch("callsheet.round.decide", return_value=decision), \
+         patch("callsheet.round.write_annotation", AsyncMock(side_effect=RuntimeError("grafana 503"))):
+        result = await run_round(CONFIG, SHOTS, review, now_epoch_s=NOW)
+
+    assert result.decision is decision, "the decision survives a failed write"
+    assert result.annotation_written is False
+    assert "503" in result.degraded_reason
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -1122,7 +1157,14 @@ async def run_round(config: Config, shots: list[Shot], review: Review,
     except Exception as error:      # noqa: BLE001 — degrade, never crash the loop
         return RoundResult(forecasts, None, False, degraded_reason=str(error))
 
-    await write_annotation(config, decision, now_epoch_s)
+    # The write is wrapped too. A Grafana blip must not discard a forecast and a
+    # decision that both succeeded — that is the same failure class the model
+    # call is already protected against.
+    try:
+        await write_annotation(config, decision, now_epoch_s)
+    except Exception as error:      # noqa: BLE001
+        return RoundResult(forecasts, decision, False, degraded_reason=f"annotation failed: {error}")
+
     return RoundResult(forecasts, decision, True)
 ```
 
@@ -1212,8 +1254,10 @@ def main() -> int:
 
     for forecast in result.forecasts:
         state = "MISS" if forecast.misses_deadline else "ok  "
+        # Provenance is printed because a judge watching the demo cannot
+        # otherwise tell a measured prediction from an 8-second default.
         print(f"  {state} {forecast.shot_id}: {forecast.frames_remaining} frames, "
-              f"{forecast.predicted_ms / 1000:.1f}s predicted")
+              f"{forecast.predicted_ms / 1000:.1f}s predicted ({forecast.estimate_source})")
 
     if result.degraded_reason:
         print(f"DEGRADED: {result.degraded_reason}")
@@ -1251,10 +1295,10 @@ render. Re-run `python scripts/spike_end_to_end.py` to generate fresh telemetry.
 
 - [ ] **Step 4: Confirm the annotation landed in Grafana**
 
-Open the stack → **Dashboards → Annotations**, filter tag `callsheet`. The
-decision text must be visible. A passing test is not proof here; the annotation
-tool declares no required arguments, so a malformed payload can be accepted and
-discarded.
+Task 5's integration test already reads it back by tag through `get_annotations`,
+which is the real assertion. Open the stack → **Dashboards → Annotations**,
+filter tag `callsheet`, as a secondary visual confirmation — but the mechanical
+read-back is what counts.
 
 - [ ] **Step 5: Update the README** with a Phase 2 section and the new run command.
 
