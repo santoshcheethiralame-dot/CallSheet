@@ -1,0 +1,5 @@
+{
+  "name": "Director review",
+  "deadline_epoch_s": 0,
+  "required_shots": ["SH001", "SH003"]
+}
