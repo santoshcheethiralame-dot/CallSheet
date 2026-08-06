@@ -1165,25 +1165,42 @@ from callsheet.worker import run_manifest
 
 INGEST_WAIT_S = 90
 
+# Established in Task 6 against the live stack, not guessed.
+PROM_DATASOURCE_UID = "grafanacloud-prom"
+REQUIRED_TOOLS = ("list_datasources", "query_prometheus")
+
+# `count by (__name__)` and not bare `count()`: a bare aggregation DROPS the
+# metric name, so the caller's substring check could never match no matter how
+# healthy the stack was.
+PROBE_QUERY = 'count by (__name__) ({__name__=~"render_frame_duration.*"})'
+
 
 async def read_back(config: Config) -> str:
     tools = await list_tools(config)
     print(f"  mcp-grafana exposes {len(tools)} tools")
 
-    query_tool = next((name for name in tools if "query" in name and "prometheus" in name), None)
-    if query_tool is None:
-        raise RuntimeError(f"No Prometheus query tool found. Tools: {sorted(tools)}")
+    # Exact names, not substring matching: "query" + "prometheus" matches BOTH
+    # query_prometheus and query_prometheus_histogram, so which one you got
+    # depended on server ordering.
+    missing = [name for name in REQUIRED_TOOLS if name not in tools]
+    if missing:
+        raise RuntimeError(f"mcp-grafana is missing {missing}. Tools: {sorted(tools)}")
 
-    datasource_tool = next(name for name in tools if "list" in name and "datasource" in name)
-    datasources = await call_tool(config, datasource_tool, {})
+    datasources = await call_tool(config, "list_datasources", {})
     print(f"  datasources: {datasources[:200]}")
 
-    # Series name is discovered here, not assumed: OTel's render.frame.duration
-    # is rewritten by Prometheus, typically to render_frame_duration_milliseconds_count.
+    # datasourceUid and endTime are both REQUIRED. Omitting them does not raise —
+    # the server returns its error as ordinary text content, which sails past any
+    # try/except and gets misreported as a credentials failure.
     return await call_tool(
         config,
-        query_tool,
-        {"expr": 'count({__name__=~"render_frame_duration.*"})', "queryType": "instant"},
+        "query_prometheus",
+        {
+            "datasourceUid": PROM_DATASOURCE_UID,
+            "expr": PROBE_QUERY,
+            "queryType": "instant",
+            "endTime": "now",
+        },
     )
 
 
