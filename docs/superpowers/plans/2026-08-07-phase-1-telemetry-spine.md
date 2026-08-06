@@ -1005,6 +1005,121 @@ Expected: 2 passed, and the printed tool list.
 querying Prometheus, querying Loki and creating annotations are inputs to the
 agent's tool wiring, and guessing them is how Phase 2 stalls.
 
+#### Discovered `mcp-grafana` v1.0.0 tool names — 73 tools
+
+Captured from a live stdio session against `https://vastfoyer1220.grafana.net`
+on 2026-08-07 with no `-disable-*` flags. These are the exact strings Phase 2
+must pass to `call_tool`. Eight of the 73 are proxied from the connected
+datasource (the `tempo_*` group).
+
+**The four that matter:**
+
+| Role | Tool name | Required arguments |
+|---|---|---|
+| Query Prometheus | `query_prometheus` | `datasourceUid`, `expr`, `endTime` (plus `startTime` + `stepSeconds` when `queryType="range"`) |
+| Query Loki | `query_loki_logs` | `datasourceUid`, `logql` |
+| List datasources | `list_datasources` | none |
+| Create annotation | `create_annotation` | none declared; in practice `text` + `time` (epoch ms), optional `dashboardUid`, `panelId`, `tags` |
+
+`datasourceUid` is **mandatory** on every query tool and has no default — the
+UIDs are `grafanacloud-prom`, `grafanacloud-logs`, `grafanacloud-traces`.
+`query_prometheus` also requires `endTime`; omitting either does not raise, it
+returns an error string as ordinary text content.
+
+Full list:
+
+- `add_activity_to_incident`
+- `alerting_manage_routing`
+- `alerting_manage_rules`
+- `analyze_loki_labels`
+- `check_datasources_health`
+- `create_annotation`
+- `create_datasource`
+- `create_folder`
+- `create_incident`
+- `create_snapshot`
+- `delete_snapshot`
+- `find_error_pattern_logs`
+- `find_slow_requests`
+- `generate_deeplink`
+- `get_alert_group`
+- `get_annotation_tags`
+- `get_annotations`
+- `get_assertions`
+- `get_current_oncall_users`
+- `get_dashboard_by_uid`
+- `get_dashboard_panel_queries`
+- `get_dashboard_property`
+- `get_dashboard_summary`
+- `get_datasource`
+- `get_incident`
+- `get_oncall_shift`
+- `get_panel_image`
+- `get_plugin`
+- `get_sift_analysis`
+- `get_sift_investigation`
+- `get_snapshot`
+- `grafana_api_request`
+- `install_plugin`
+- `list_alert_groups`
+- `list_datasources`
+- `list_incidents`
+- `list_loki_label_names`
+- `list_loki_label_values`
+- `list_oncall_schedules`
+- `list_oncall_teams`
+- `list_oncall_users`
+- `list_prometheus_label_names`
+- `list_prometheus_label_values`
+- `list_prometheus_metric_metadata`
+- `list_prometheus_metric_names`
+- `list_provisioning_repositories`
+- `list_pyroscope_label_names`
+- `list_pyroscope_label_values`
+- `list_pyroscope_profile_types`
+- `list_sift_investigations`
+- `list_snapshots`
+- `query_loki_logs`
+- `query_loki_patterns`
+- `query_loki_stats`
+- `query_prometheus`
+- `query_prometheus_histogram`
+- `query_pyroscope`
+- `search_dashboards`
+- `search_folders`
+- `search_plugin_information`
+- `suggest_loki_alloy_label_config`
+- `tempo_docs-config`
+- `tempo_docs-traceql`
+- `tempo_get-attribute-names`
+- `tempo_get-attribute-values`
+- `tempo_get-trace`
+- `tempo_traceql-metrics-instant`
+- `tempo_traceql-metrics-range`
+- `tempo_traceql-search`
+- `update_annotation`
+- `update_dashboard`
+- `update_datasource`
+- `validate_provisioning_file`
+
+Phase 2 note: `query_prometheus_histogram` generates the `histogram_quantile`
+PromQL for us from `metric` + `percentile`, which is exactly the shape the
+deadline forecaster wants against `render_frame_duration_milliseconds_bucket`.
+Pass the base name without the `_bucket` suffix.
+
+#### mcp SDK 2.0 compatibility
+
+`mcp` resolved to **2.0.0**. `ClientSession`, `StdioServerParameters` and
+`mcp.client.stdio.stdio_client` all survive under those exact names with
+compatible signatures, so the code above needed no import changes. Two shifts
+worth knowing:
+
+- `ClientSession.call_tool` is now typed `-> CallToolResult | InputRequiredResult
+  | Result`. Only `CallToolResult` carries `.content`, so the implementation
+  reads it through `getattr(result, "content", [])` rather than `result.content`.
+- `Tool.inputSchema` is now `Tool.input_schema` (snake_case). Nothing in this
+  task reads it, but Phase 2's tool wiring will.
+
 - [ ] **Step 6: Commit**
 
 ```bash
