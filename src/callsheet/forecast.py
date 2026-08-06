@@ -8,6 +8,10 @@ from dataclasses import dataclass
 from callsheet.domain import FarmState, Review, Shot
 
 
+OBSERVED = "observed"
+FALLBACK = "fallback"
+
+
 @dataclass(frozen=True)
 class Forecast:
     shot_id: str
@@ -15,6 +19,12 @@ class Forecast:
     predicted_ms: float
     finishes_at_epoch_s: int
     misses_deadline: bool
+    estimate_source: str
+    """`"observed"` if the per-frame figure came from measured telemetry,
+    `"fallback"` if it is the global guess. Deliberately has no default: a
+    forecast built from a guess must not be able to pass itself off as a
+    measurement, and the whole point of this file is that its numbers are
+    auditable."""
 
 
 def forecast_all(
@@ -37,7 +47,8 @@ def forecast_all(
     Per-shot mean frame duration is read from observed telemetry and already
     includes Blender's fixed startup cost for that shot, so no separate
     overhead term is modelled. Shots with no observed history fall back to
-    `fallback_frame_ms`.
+    `fallback_frame_ms` and are marked `estimate_source="fallback"`, so a guess
+    can never be mistaken for a measurement further down the pipeline.
 
     Completion times round *up* to the whole second. A forecaster that floors
     can report a shot finishing exactly on the deadline when it truly lands a
@@ -50,7 +61,8 @@ def forecast_all(
     for shot in shots:
         done = state.frames_done.get(shot.id, 0)
         remaining = max(0, len(shot.frames) - done)
-        per_frame = state.mean_frame_ms.get(shot.id, fallback_frame_ms)
+        observed = state.mean_frame_ms.get(shot.id)
+        per_frame = fallback_frame_ms if observed is None else observed
         predicted = remaining * per_frame
 
         cursor_ms += predicted
@@ -64,6 +76,7 @@ def forecast_all(
                 predicted_ms=predicted,
                 finishes_at_epoch_s=finishes_at,
                 misses_deadline=required and finishes_at > review.deadline_epoch_s,
+                estimate_source=FALLBACK if observed is None else OBSERVED,
             )
         )
 

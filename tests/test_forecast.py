@@ -55,6 +55,28 @@ def test_shot_with_no_history_uses_the_fallback():
     assert forecast.predicted_ms == 16000.0
 
 
+def test_a_measured_forecast_says_so():
+    """A judge must be able to tell a measurement from a guess."""
+    shots = [_shot("SH001", frames=3)]
+    state = FarmState(mean_frame_ms={"SH001": 5000.0}, frames_done={})
+    review = Review("R", NOW + 3600, ["SH001"])
+
+    forecast = forecast_all(shots, review, state, now_epoch_s=NOW)[0]
+
+    assert forecast.estimate_source == "observed"
+
+
+def test_a_guessed_forecast_says_so_too():
+    """Silently substituting an 8s guess would let a fabrication read as a measurement."""
+    shots = [_shot("SH999", frames=2)]
+    state = FarmState()
+    review = Review("R", NOW + 3600, ["SH999"])
+
+    forecast = forecast_all(shots, review, state, now_epoch_s=NOW)[0]
+
+    assert forecast.estimate_source == "fallback"
+
+
 def test_a_shot_that_cannot_finish_in_time_is_flagged():
     shots = [_shot("SH003", frames=3)]
     state = FarmState(mean_frame_ms={"SH003": 26000.0}, frames_done={"SH003": 0})
