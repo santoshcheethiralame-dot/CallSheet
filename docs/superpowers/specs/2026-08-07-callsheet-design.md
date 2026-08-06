@@ -333,4 +333,67 @@ Tempo datasource), `gemini-3.6-flash`.
 
 ---
 
+## 13. Phase 2 findings
+
+**The loop works end to end.** `demo_round.py` exits 0: observe real farm state
+through the Grafana MCP server → forecast deterministically → call Gemini only
+because a required shot misses → write the decision back as an annotation that
+is then retrievable by tag.
+
+```
+Review 'Director review' in 30s, requires ['SH001', 'SH003']
+  ok   SH001: 3 frames, 15.4s predicted (observed)
+  ok   SH002: 3 frames, 22.0s predicted (observed)
+  MISS SH003: 3 frames, 80.4s predicted (observed)
+
+CALL SHEET: I am preempting SH002 because it is ahead of SH003 in the queue
+            and not required for today's director review.
+```
+
+**Telemetry cannot answer "what is left".** The first draft read frames-remaining
+from `render_frame_duration_milliseconds_count`, a lifetime counter. Since Phase
+1 had already rendered every shot to completion, every forecast would have shown
+zero work remaining and the agent would never have fired. Telemetry answers *how
+fast*; the queue answers *what is left*. §5.2's metric list is for rate
+estimation only.
+
+**Flooring a deadline forecast is unsafe.** `int(ms // 1000)` reported a shot
+that misses by half a second as on time. The two errors are not symmetric: a
+false "on time" means the model is never consulted and the shot silently misses
+— the exact failure this system exists to prevent — while a false "miss" costs
+one model call. Rounds up now.
+
+**The model needs the queue's shape, not just its numbers.** Given per-shot ETAs
+alone, Gemini proposed preempting a shot that sat *behind* the at-risk shot —
+plausible-sounding and completely inert. The prompt never said the farm is one
+serial queue, though `forecast_all`'s whole contract is that list order is render
+order. Stating queue position fixed it. This is the sharpest lesson of Phase 2:
+**an agent given real telemetry and no structural context produces confident
+decisions that do nothing.**
+
+### The gap Phase 3 must close
+
+**Nothing verifies that the chosen actions actually clear the deadline.** In the
+demo, preempting SH002 returns 22.0s to SH003, which needs roughly 66s more than
+it has. The decision is directionally right and no longer inert — but it is
+*insufficient*, and the system prints PASS anyway. The annotation therefore
+records intent, not outcome.
+
+The fix is pure arithmetic and belongs first in Plan 3: re-run `forecast_all`
+over the post-action queue, report the residual shortfall, and escalate when no
+combination of actions can close it. A coordinator who says "I fixed it" when
+they have not is worse than one who says "this cannot be saved, wake someone."
+That honesty is also the more defensible thing to show a judge.
+
+Related: queue-position reasoning is currently prompt-level only. A structural
+guard — reject any action on a shot at or behind the at-risk shot's queue index
+— would make the invariant enforceable rather than merely requested. It belongs
+next to wherever actions get applied.
+
+**Environment additions:** `google-genai` 2.17.0, `gemini-3.6-flash`. Observed
+per-shot means held steady across sessions: SH001 5147 ms, SH002 7341 ms,
+SH003 26815 ms.
+
+---
+
 _Living doc. Update the same day a decision changes._
