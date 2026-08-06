@@ -258,9 +258,68 @@ This also makes the product's premise more honest, not less: unpredictable
 render times are precisely why a coordinator cannot eyeball the queue and know
 what will miss.
 
+**OTLP ingest confirmed working.** A point pushed to the ap-south-1 gateway was
+queryable 45s later. The riskiest assumption in the whole design is retired.
+
+Resolved facts Phase 2 builds on:
+
+| Fact | Value |
+|---|---|
+| Stack | `https://vastfoyer1220.grafana.net` (instance `1756233`, region `prod-ap-south-1`) |
+| Prometheus datasource UID | `grafanacloud-prom` |
+| Traces / logs datasource UIDs | `grafanacloud-traces` / `grafanacloud-logs` |
+| Metric names after OTel→Prometheus rewrite | `render_frame_duration_milliseconds_{sum,bucket,count}` |
+| Observed ingestion delay | under 45s |
+
+The metric-name rewrite is worth stating plainly because it is the trap the plan
+predicted: `render.frame.duration` recorded with `unit="ms"` does **not** arrive
+as `render_frame_duration`. Any query written against the OTel name silently
+returns nothing rather than erroring.
+
+**The gate passed on the first attempt.** `scripts/spike_end_to_end.py` exited 0
+on 2026-08-07: nine real frames rendered, exported over OTLP, and read back
+through `mcp-grafana` by code. Total wall clock 224s, of which 90s was the
+deliberate ingestion wait and ~131s was rendering — the MCP read-back itself
+cost about 3s across three separate stdio sessions.
+
+Per-shot durations for this run, three frames each:
+
+| Shot | Samples | Frame 1 | Frame 2 | Frame 3 | Mean |
+|---|---|---|---|---|---|
+| SH001 | 16 | 5212 ms | 5475 ms | 4819 ms | 5169 ms |
+| SH002 | 64 | 7874 ms | 7366 ms | 7315 ms | 7519 ms |
+| SH003 | 256 | 26309 ms | 27229 ms | 26402 ms | 26647 ms |
+
+Four things worth carrying into Phase 2:
+
+1. **The round trip is exact.** Querying
+   `sum by (shot) (..._sum) / sum by (shot) (..._count)` back through the MCP
+   server returned 5168.57 / 7518.73 / 26646.55 ms against locally measured means
+   of 5169 / 7519 / 26647. Nothing was lost, resampled, or rounded in transit,
+   and every attribute survived: `shot`, `sequence`, `quality`, `outcome`.
+2. **`service.name` becomes the Prometheus `job` label.** The series carry
+   `job="callsheet-worker"`. Phase 2 queries must scope on `job`, not on a
+   `service_name` label that does not exist.
+3. **Within-run variance is far tighter than across-run variance.** Three frames
+   of SH003 landed within 3.5% of each other, while §12's earlier two-run table
+   showed a 1.5x swing on the same shot. The noise is between process launches,
+   not between frames — so the ablation in §6 must repeat whole runs, and
+   averaging frames inside one run will understate the true spread.
+4. **The gate's own pass condition is weaker than the result it produced.** The
+   spike asserts only that `render_frame_duration` appears in the query response;
+   a stale series from an earlier run would satisfy it just as well. It passed
+   for the right reason here — verified separately by the value match in (1) —
+   but Phase 2 should not reuse this check as a regression test without
+   pinning it to a fresh timestamp or an expected value.
+
+Ingestion was comfortably inside the 90s budget. The earlier "under 45s"
+measurement stands; the conservative wait is kept because a false negative at a
+gate costs a full rebuild and 90s costs nothing.
+
 **Environment as verified:** Blender 5.2.0 LTS (every 4.x bpy call in the
 generator works unchanged), Python 3.12.10, `mcp` 2.0.0, OpenTelemetry SDK
-1.44.0, `mcp-grafana` v1.0.0.
+1.44.0, `mcp-grafana` v1.0.0 (73 tools, 8 of them proxied from the connected
+Tempo datasource).
 
 ---
 
