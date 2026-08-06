@@ -37,7 +37,7 @@ coordinator, and nobody builds it.
 | Constraint | Resolution |
 |---|---|
 | $0 total cost, no credit card | Grafana Cloud free plan (permanent, no card): 10k series, 50 GB logs, 50 GB traces, 3 users, 14-day retention. Gemini via AI Studio free tier (permanent, no card). Blender, OTel, FastAPI, SQLite all free. |
-| Gemini free-tier quota | 2.5 Flash: 10 RPM / 250 RPD (quotas cut 50–80% in Dec 2025). Architecture keeps the LLM to a handful of calls per scheduling round, not one per metric. |
+| Gemini free-tier quota | **3.6 Flash: ~15 RPM / 1500 RPD.** 2.5 Flash and 2.5 Flash-Lite return 404 "no longer available to new users" — the model this spec originally named cannot be called at all. Architecture still keeps the LLM to a handful of calls per scheduling round, not one per metric. |
 | Partner requirement | Grafana MCP server (`mcp-grafana`) connected and called at runtime. AI Observability added as a complement, which the rules note does not satisfy the requirement alone. |
 | Google Cloud requirement | `google-adk` + `google-genai` imported and called; Cloud Run hosts the board. |
 | New work only | Fresh repo, no reuse from Forge / Chronos / Hemlock / Untangle. |
@@ -58,7 +58,7 @@ and **Review** (what the human cares about).
 ## 5. Architecture
 
 ```
-Blender workers ──OTel──► Grafana Cloud ◄──MCP── ADK agent (Gemini 2.5 Flash)
+Blender workers ──OTel──► Grafana Cloud ◄──MCP── ADK agent (Gemini 3.6 Flash)
       │                    (metrics/logs/traces)         │
       │                                                  │ requeue / preempt
       ▼                                                  ▼
@@ -92,7 +92,7 @@ Three workers at a few series each sits far below the 10k active-series ceiling.
 
 ### 5.3 Agent layer
 
-Google ADK agent on Gemini 2.5 Flash via `google-genai`. Two tool families:
+Google ADK agent on Gemini 3.6 Flash via `google-genai`. Two tool families:
 
 1. **Grafana MCP** (`mcp-grafana`, service-account token) — the load-bearing
    partner integration. Queries Prometheus and Loki, reads alert rules, and
@@ -316,10 +316,20 @@ Ingestion was comfortably inside the 90s budget. The earlier "under 45s"
 measurement stands; the conservative wait is kept because a false negative at a
 gate costs a full rebuild and 90s costs nothing.
 
+**Gemini 2.5 is gone; the model choice changed.** `gemini-2.5-flash` and
+`gemini-2.5-flash-lite` both return `404 — no longer available to new users`.
+Verified working on this key: `gemini-3.6-flash` (1.8s for a trivial prompt) and
+`gemini-3.5-flash`. **Plan of record is `gemini-3.6-flash`**, free tier ~15 RPM
+/ 1500 RPD — more headroom than the 2.5 Flash figures this spec was originally
+written against, not less.
+
+**`service.name` becomes the Prometheus `job` label.** Queries scoped on a
+`service_name` label return nothing, silently. Use `job="callsheet-worker"`.
+
 **Environment as verified:** Blender 5.2.0 LTS (every 4.x bpy call in the
 generator works unchanged), Python 3.12.10, `mcp` 2.0.0, OpenTelemetry SDK
 1.44.0, `mcp-grafana` v1.0.0 (73 tools, 8 of them proxied from the connected
-Tempo datasource).
+Tempo datasource), `gemini-3.6-flash`.
 
 ---
 
