@@ -489,9 +489,9 @@ main()
 
 - [ ] **Step 2: Install Blender and generate the scenes**
 
-Being installed via `winget install BlenderFoundation.Blender` — resolved to
-**Blender 5.2.0**, not the 4.x this script was written against. Confirm the
-install path, then set `BLENDER_PATH` in `.env` to the real `blender.exe`.
+✅ **Done.** Installed via `winget install BlenderFoundation.Blender` — **Blender
+5.2.0 LTS** at `C:\Program Files\Blender Foundation\Blender 5.2\blender.exe`.
+Every 4.x call in this script was probed and works unchanged on 5.2.
 
 ```bash
 & "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" -b -P scenes/make_scenes.py
@@ -1133,7 +1133,7 @@ read back through the Grafana MCP server.
 
 ## Setup
 
-1. Install Blender 4.x and Python 3.11+.
+1. Install Blender 4.2+ (verified on 5.2.0 LTS) and Python 3.11+.
 2. Install the `mcp-grafana` binary from https://github.com/grafana/mcp-grafana/releases
 3. Create a free Grafana Cloud stack (no credit card required).
 4. `copy .env.example .env` and fill in every value.
@@ -1215,8 +1215,9 @@ sets how fast a scheduling round can possibly react.
 
 ## Definition of done for Phase 1
 
-- [ ] `python -m pytest` passes with no Blender and no credentials
-- [ ] `python -m pytest -m integration` passes locally
+- [x] `python -m pytest` passes with no Blender and no credentials — 19 passed
+- [x] `python -m pytest tests/test_scenes.py -m integration` passes — render cost is monotonic
+- [ ] `python -m pytest tests/test_grafana_mcp.py -m integration` passes — **blocked until a Grafana Cloud account exists**
 - [ ] `python scripts/spike_end_to_end.py` exits 0
 - [ ] `LICENSE` is present and Apache-2.0
 - [ ] No secrets committed — `git log -p | Select-String "glsa_" | Select-String -NotMatch "glsa_abc"` finds nothing (the literal `glsa_abc` is the dummy token used in tests and in this plan, so a bare `glsa_` search always matches)

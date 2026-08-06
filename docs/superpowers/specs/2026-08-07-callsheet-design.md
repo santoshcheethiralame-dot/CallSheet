@@ -227,4 +227,41 @@ Domain-native, and it names the output rather than the technology.
 
 ---
 
+## 12. Phase 1 findings
+
+Recorded as they land. Phase 2 is planned against these, not against assumptions.
+
+**Render cost is `~4s + k·samples`, not proportional to samples.** Blender's
+process startup is a fixed ~4 second floor that dominates cheap shots. Measured
+on frame 1, two runs:
+
+| Shot | Samples | Run 1 | Run 2 |
+|---|---|---|---|
+| SH001 | 16 | 4103 ms | 4418 ms |
+| SH002 | 64 | 4701 ms | 7215 ms |
+| SH003 | 256 | 23767 ms | 15394 ms |
+
+Three consequences, all of which change Phase 2:
+
+1. **The deadline forecaster must model a fixed per-job overhead**, not a pure
+   per-sample rate. A naive linear fit through the origin will badly
+   underestimate the cost of many cheap shots and overestimate one expensive one.
+2. **Adjacent cheap shots are within noise of each other** — SH001 and SH002
+   differ by 0.6s in run 1 and will occasionally invert. Nothing may assert
+   strict monotonicity across neighbouring shots.
+3. **Run-to-run variance is large** (SH003 swung 15.4s–23.8s, a 1.5x spread on
+   identical work). The ablation in §6 therefore needs repeated runs and a
+   reported spread, not a single number per scheduler — a single-run table would
+   be measuring noise and calling it a result.
+
+This also makes the product's premise more honest, not less: unpredictable
+render times are precisely why a coordinator cannot eyeball the queue and know
+what will miss.
+
+**Environment as verified:** Blender 5.2.0 LTS (every 4.x bpy call in the
+generator works unchanged), Python 3.12.10, `mcp` 2.0.0, OpenTelemetry SDK
+1.44.0, `mcp-grafana` v1.0.0.
+
+---
+
 _Living doc. Update the same day a decision changes._
