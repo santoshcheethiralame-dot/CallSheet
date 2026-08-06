@@ -24,6 +24,14 @@ SYSTEM = """You are the production coordinator for a VFX render farm.
 A render deadline is going to be missed. The shortfall has already been measured
 for you. Every number below is a given fact. Do not revise it.
 
+The farm is a single serial queue. One shot renders at a time, in the order it
+is listed for you, and a shot starts only once everything ahead of it is done.
+So preempting or downgrading a shot returns time only to the shots that come
+after it in the queue. Sacrificing a shot that already sits behind the at-risk
+shot achieves nothing for it — check the queue positions before you act. When
+nothing ahead of an at-risk shot can be given up, the honest moves are to
+downgrade that shot itself or to escalate.
+
 Decide which shots to sacrifice so the required shots make the review. Prefer
 sacrificing shots the director has already cut. Never preempt a shot the review
 requires. Downgrading a shot to proxy quality is acceptable for a review; it is
@@ -57,9 +65,16 @@ def build_prompt(shots: list[Shot], review: Review, forecasts: list[Forecast]) -
         "",
         "Shortfalls below are rounded up to whole seconds. Treat them as given.",
         "",
+        # `forecast_all`'s entire contract is that list order is render order,
+        # and the ETAs alone do not reveal it. Without the ordering stated, the
+        # model proposes sacrifices that sit behind the shot they are meant to
+        # rescue, which recover nothing.
+        "Render queue, in order. The farm renders one shot at a time and each"
+        " shot waits for everything above it:",
+        "",
     ]
 
-    for forecast in forecasts:
+    for position, forecast in enumerate(forecasts, start=1):
         shot = by_id[forecast.shot_id]
         shortfall = forecast.finishes_at_epoch_s - review.deadline_epoch_s
         status = f"MISSES by {shortfall}s" if forecast.misses_deadline else "on time"
@@ -68,7 +83,7 @@ def build_prompt(shots: list[Shot], review: Review, forecasts: list[Forecast]) -
         confidence = " [no telemetry for this shot: figure is a default]" \
             if forecast.estimate_source == FALLBACK else ""
         lines.append(
-            f"{shot.id}: {forecast.frames_remaining} frames left, "
+            f"{position}. {shot.id}: {forecast.frames_remaining} frames left, "
             f"priority {shot.priority}, quality {shot.quality}, "
             f"{'CUT by the director' if shot.is_cut else 'in the edit'} — {status}"
             f"{confidence}"

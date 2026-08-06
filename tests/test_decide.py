@@ -32,6 +32,31 @@ def test_prompt_marks_cut_shots_so_the_model_can_prefer_sacrificing_them():
     assert "cut" in prompt.lower()
 
 
+def test_prompt_states_the_queue_position_of_every_shot():
+    """The farm is one serial queue, and the model cannot see that from ETAs alone.
+
+    Asked to save SH001 — which is *first* in the queue — Gemini proposed
+    preempting SH002 "to free up farm resources". SH002 renders after SH001, so
+    the sacrifice recovers nothing. The prompt has to say what the render order
+    is before a judgement about it can be sound.
+    """
+    prompt = build_prompt(SHOTS, REVIEW, FORECASTS)
+    rows = [line for line in prompt.splitlines() if "frames left" in line]
+
+    assert rows[0].startswith("1. SH001:")
+    assert rows[1].startswith("2. SH002:")
+    assert "one shot at a time" in prompt.lower()
+    assert "queue" in prompt.lower()
+
+
+def test_system_says_a_sacrifice_only_helps_shots_behind_it():
+    from callsheet.decide import SYSTEM
+
+    lowered = SYSTEM.lower()
+    assert "after it in the queue" in lowered
+    assert "achieves nothing" in lowered
+
+
 def test_prompt_flags_a_guessed_estimate_so_the_model_can_discount_it():
     """A judgement made on an 8-second invention deserves to know it is one."""
     guessed = [
@@ -79,6 +104,13 @@ def test_parse_decision_survives_a_fenced_code_block():
 
 @pytest.mark.integration
 def test_gemini_returns_a_usable_decision():
+    """SH001 is *first* in the queue, so only SH001 itself can be acted on.
+
+    This test used to demand an action on SH002, the cut shot — which reads as
+    the obvious sacrifice until you notice SH002 renders after SH001 and giving
+    it up returns no time at all. The model duly proposed preempting it "to free
+    up farm resources", and the assertion happily passed. Both were wrong.
+    """
     from callsheet.config import Config
     from callsheet.decide import decide
 
@@ -87,5 +119,6 @@ def test_gemini_returns_a_usable_decision():
     assert decision.summary
     assert decision.actions, "a forecast miss should produce at least one action"
     assert all(a.action in {"preempt", "downgrade", "escalate"} for a in decision.actions)
-    # The sensible call is to sacrifice the cut shot, not the hero shot.
-    assert any(a.shot_id == "SH002" for a in decision.actions)
+    assert any(a.shot_id == "SH001" for a in decision.actions)
+    assert not any(a.shot_id == "SH002" for a in decision.actions), \
+        "SH002 sits behind SH001 in the queue; sacrificing it recovers nothing"
