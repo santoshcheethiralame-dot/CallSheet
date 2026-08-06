@@ -1,0 +1,32 @@
+[
+  {
+    "shot": "SH001",
+    "scene": "scenes/SH001.blend",
+    "samples": 16,
+    "frames": [
+      1,
+      2,
+      3
+    ]
+  },
+  {
+    "shot": "SH002",
+    "scene": "scenes/SH002.blend",
+    "samples": 64,
+    "frames": [
+      1,
+      2,
+      3
+    ]
+  },
+  {
+    "shot": "SH003",
+    "scene": "scenes/SH003.blend",
+    "samples": 256,
+    "frames": [
+      1,
+      2,
+      3
+    ]
+  }
+]
