@@ -409,19 +409,36 @@ git commit -m "Add deterministic deadline forecaster driven by observed frame ti
 
 **Interfaces:**
 - Consumes: `call_tool` from `callsheet.grafana_mcp` (Phase 1), `FarmState` from Task 1
-- Produces: `parse_farm_state(mean_json: str, count_json: str) -> FarmState` (pure, unit-tested) and `async read_farm_state(config) -> FarmState` (integration-tested)
+- Produces: `parse_farm_state(mean_json: str) -> FarmState` (pure, unit-tested) and `async read_farm_state(config) -> FarmState` (integration-tested)
 
 Split deliberately: the parsing is pure and testable offline against captured
 fixtures; only the fetching needs credentials.
 
-The two PromQL queries, using the names Phase 1 established:
+> **Grafana supplies the rate, never the remaining work.** An earlier draft of
+> this task also read `frames_done` from
+> `sum by (shot) (render_frame_duration_milliseconds_count)`. That is a *lifetime*
+> counter — "frames ever rendered for this shot" — not "frames done toward this
+> review. Since Phase 1 already rendered 3 frames of each shot and the manifest
+> declares 3 frames each, every shot would forecast `remaining = 0`, nothing
+> would ever miss, and the Phase 2 demo could never fire. Re-running the spike
+> would make it worse, not better.
+>
+> The underlying error was conflating two questions. **Telemetry answers "how
+> fast is this shot?"** — and there, more history is strictly better. **The queue
+> answers "what is left?"** Phase 2 therefore reads only the rate; `frames_done`
+> is supplied by the caller and is empty until Plan 3 builds the job queue. That
+> is also why `FarmState.frames_done` keeps its default of `{}`.
+
+One PromQL query, using the names Phase 1 established:
 
 ```
-sum by (shot) (rate(render_frame_duration_milliseconds_sum[10m]))
-  / sum by (shot) (rate(render_frame_duration_milliseconds_count[10m]))
-
-sum by (shot) (render_frame_duration_milliseconds_count)
+sum by (shot) (rate(render_frame_duration_milliseconds_sum[1h]))
+  / sum by (shot) (rate(render_frame_duration_milliseconds_count[1h]))
 ```
+
+A `[1h]` window rather than `[10m]`: SH003 alone takes 80 seconds, and a
+10-minute window ages out between a render and a later demo run, silently
+returning an empty result that looks identical to a cold farm.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -439,41 +456,42 @@ MEANS = json.dumps({"data": [
     {"metric": {"shot": "SH003"}, "value": [1786047271.417, "26646.55"]},
 ]})
 
-COUNTS = json.dumps({"data": [
-    {"metric": {"shot": "SH001"}, "value": [1786047271.417, "3"]},
-    {"metric": {"shot": "SH003"}, "value": [1786047271.417, "3"]},
-]})
-
 
 def test_parses_mean_frame_duration_per_shot():
-    state = parse_farm_state(MEANS, COUNTS)
+    state = parse_farm_state(MEANS)
     assert state.mean_frame_ms["SH001"] == pytest.approx(5168.57)
     assert state.mean_frame_ms["SH003"] == pytest.approx(26646.55)
 
 
-def test_parses_frames_done_per_shot():
-    state = parse_farm_state(MEANS, COUNTS)
-    assert state.frames_done == {"SH001": 3, "SH003": 3}
+def test_frames_done_is_never_read_from_telemetry():
+    """Grafana knows the rate. Only the queue knows what is left to do."""
+    state = parse_farm_state(MEANS)
+    assert state.frames_done == {}
 
 
 def test_empty_response_yields_empty_state_not_an_error():
     """A cold farm has no series yet. That is normal, not a failure."""
-    state = parse_farm_state(json.dumps({"data": []}), json.dumps({"data": []}))
+    state = parse_farm_state(json.dumps({"data": []}))
     assert state.mean_frame_ms == {}
-    assert state.frames_done == {}
 
 
 def test_series_without_a_shot_label_is_ignored():
     noisy = json.dumps({"data": [{"metric": {}, "value": [0, "123"]}]})
-    state = parse_farm_state(noisy, noisy)
-    assert state.mean_frame_ms == {}
+    assert parse_farm_state(noisy).mean_frame_ms == {}
 
 
 def test_nan_mean_is_dropped_rather_than_poisoning_the_forecast():
     """rate() over a window with one sample yields NaN. It must not become 0.0."""
     nan_means = json.dumps({"data": [{"metric": {"shot": "SH001"}, "value": [0, "NaN"]}]})
-    state = parse_farm_state(nan_means, COUNTS)
-    assert "SH001" not in state.mean_frame_ms
+    assert "SH001" not in parse_farm_state(nan_means).mean_frame_ms
+
+
+def test_prometheus_http_api_shape_is_also_accepted():
+    """mcp-grafana may hand back {"data": {"result": [...]}} rather than {"data": [...]}."""
+    wrapped = json.dumps({"data": {"result": [
+        {"metric": {"shot": "SH001"}, "value": [0, "1234.5"]},
+    ]}})
+    assert parse_farm_state(wrapped).mean_frame_ms["SH001"] == pytest.approx(1234.5)
 
 
 @pytest.mark.integration
@@ -483,7 +501,7 @@ async def test_reads_real_farm_state_from_grafana():
     from callsheet.farm_state import read_farm_state
 
     state = await read_farm_state(Config.from_env(os.environ))
-    assert state.frames_done, "expected the Phase 1 render to still be visible"
+    assert state.mean_frame_ms, "expected the Phase 1 render to still be visible"
     for shot, mean in state.mean_frame_ms.items():
         assert mean > 0, f"{shot} has a non-positive mean"
 ```
@@ -511,10 +529,9 @@ from callsheet.grafana_mcp import call_tool
 PROM_DATASOURCE_UID = "grafanacloud-prom"
 
 MEAN_QUERY = (
-    'sum by (shot) (rate(render_frame_duration_milliseconds_sum[10m]))'
-    ' / sum by (shot) (rate(render_frame_duration_milliseconds_count[10m]))'
+    'sum by (shot) (rate(render_frame_duration_milliseconds_sum[1h]))'
+    ' / sum by (shot) (rate(render_frame_duration_milliseconds_count[1h]))'
 )
-COUNT_QUERY = "sum by (shot) (render_frame_duration_milliseconds_count)"
 
 
 def _series(raw: str) -> list[dict]:
@@ -544,11 +561,15 @@ def _by_shot(raw: str) -> dict[str, float]:
     return values
 
 
-def parse_farm_state(mean_json: str, count_json: str) -> FarmState:
-    return FarmState(
-        mean_frame_ms=_by_shot(mean_json),
-        frames_done={shot: int(value) for shot, value in _by_shot(count_json).items()},
-    )
+def parse_farm_state(mean_json: str) -> FarmState:
+    """Observed per-shot frame rate. Deliberately does not report progress.
+
+    Telemetry answers "how fast is this shot?", where a longer history is
+    strictly better. It cannot answer "what is left?" — the metrics counter is
+    cumulative over the shot's lifetime, not over the current review. That
+    question belongs to the job queue, which arrives in Plan 3.
+    """
+    return FarmState(mean_frame_ms=_by_shot(mean_json))
 
 
 async def read_farm_state(config: Config) -> FarmState:
@@ -558,13 +579,7 @@ async def read_farm_state(config: Config) -> FarmState:
         "queryType": "instant",
         "endTime": "now",
     })
-    count_raw = await call_tool(config, "query_prometheus", {
-        "datasourceUid": PROM_DATASOURCE_UID,
-        "expr": COUNT_QUERY,
-        "queryType": "instant",
-        "endTime": "now",
-    })
-    return parse_farm_state(mean_raw, count_raw)
+    return parse_farm_state(mean_raw)
 ```
 
 - [ ] **Step 4: Run both test tiers**
@@ -643,10 +658,17 @@ def test_prompt_marks_cut_shots_so_the_model_can_prefer_sacrificing_them():
     assert "cut" in prompt.lower()
 
 
-def test_prompt_never_asks_the_model_to_do_arithmetic():
-    prompt = build_prompt(SHOTS, REVIEW, FORECASTS).lower()
+def test_nothing_sent_to_the_model_asks_it_to_do_arithmetic():
+    """Covers the system instruction too, not just the data block.
+
+    An earlier version asserted only on build_prompt, which is the half that was
+    never going to contain a calculation request anyway.
+    """
+    from callsheet.decide import SYSTEM
+
+    everything = (SYSTEM + build_prompt(SHOTS, REVIEW, FORECASTS)).lower()
     for banned in ("calculate", "compute", "work out", "estimate how long"):
-        assert banned not in prompt
+        assert banned not in everything, f"{banned!r} reaches the model"
 
 
 def test_parse_decision_reads_structured_actions():
@@ -751,7 +773,7 @@ VALID_ACTIONS = {"preempt", "downgrade", "escalate"}
 SYSTEM = """You are the production coordinator for a VFX render farm.
 
 A render deadline is going to be missed. The shortfall has already been measured
-for you — every number below is a fact, not something to recalculate.
+for you. Every number below is a given fact. Do not revise it.
 
 Decide which shots to sacrifice so the required shots make the review. Prefer
 sacrificing shots the director has already cut. Never preempt a shot the review
@@ -779,7 +801,14 @@ class Decision:
 
 def build_prompt(shots: list[Shot], review: Review, forecasts: list[Forecast]) -> str:
     by_id = {shot.id: shot for shot in shots}
-    lines = [f"Review: {review.name}", f"Required shots: {', '.join(review.required_shots)}", ""]
+    lines = [
+        f"Review: {review.name}",
+        f"Deadline: epoch {review.deadline_epoch_s}",
+        f"Required shots: {', '.join(review.required_shots)}",
+        "",
+        "Shortfalls below are rounded up to whole seconds. Treat them as given.",
+        "",
+    ]
 
     for forecast in forecasts:
         shot = by_id[forecast.shot_id]
@@ -1211,8 +1240,14 @@ if __name__ == "__main__":
 Run: `python scripts/demo_round.py`
 Expected: exit 0, at least one `MISS`, a call sheet, and `annotation written: True`.
 
-If exit 3, the farm has no history for the required shots — re-run
-`python scripts/spike_end_to_end.py` to generate fresh telemetry, then retry.
+**Exit 3 means the deadline was not tight enough to force a miss** — lower
+`DEADLINE_SECONDS` and retry. It does *not* mean the farm lacks history; since
+`frames_done` is empty in Phase 2, every shot is forecast at its full frame
+count, so a sufficiently tight deadline always produces a miss.
+
+If the forecast shows every shot at the 8000 ms fallback rather than the ~5.2s /
+7.5s / 26.6s observed in Phase 1, the `[1h]` rate window has aged past that
+render. Re-run `python scripts/spike_end_to_end.py` to generate fresh telemetry.
 
 - [ ] **Step 4: Confirm the annotation landed in Grafana**
 
