@@ -1065,9 +1065,10 @@ def main() -> int:
         return 2
 
     print("1/3 rendering the manifest...")
-    telemetry = Telemetry.for_grafana(config)
-    results = run_manifest(config, telemetry, "scenes/manifest.json")
-    telemetry.shutdown()
+    # The `with` form is load-bearing: shutdown() is the only thing that flushes
+    # the final export, and a run that skips it loses every metric silently.
+    with Telemetry.for_grafana(config) as telemetry:
+        results = run_manifest(config, telemetry, "scenes/manifest.json")
 
     succeeded = sum(1 for result in results if result.succeeded)
     print(f"  rendered {len(results)} frames, {succeeded} succeeded")
