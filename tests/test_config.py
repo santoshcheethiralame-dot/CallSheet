@@ -32,3 +32,21 @@ def test_from_env_lists_every_missing_key_at_once():
     assert "OTLP_ENDPOINT" in message
     assert "OTLP_AUTH" in message
     assert "BLENDER_PATH" in message
+
+
+def test_mcp_grafana_path_defaults_to_the_bare_command():
+    """Optional: falls back to PATH lookup when the binary is installed normally."""
+    config = Config.from_env(FULL_ENV)
+    assert config.mcp_grafana_path == "mcp-grafana"
+
+
+def test_mcp_grafana_path_can_be_overridden():
+    config = Config.from_env({**FULL_ENV, "MCP_GRAFANA_PATH": "C:/Users/x/bin/mcp-grafana.exe"})
+    assert config.mcp_grafana_path == "C:/Users/x/bin/mcp-grafana.exe"
+
+
+def test_mcp_grafana_path_is_not_reported_as_missing():
+    """It has a default, so its absence must never block startup."""
+    with pytest.raises(ConfigError) as excinfo:
+        Config.from_env({})
+    assert "MCP_GRAFANA_PATH" not in str(excinfo.value)

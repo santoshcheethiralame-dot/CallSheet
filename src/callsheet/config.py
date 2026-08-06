@@ -18,6 +18,11 @@ _FIELDS = {
     "blender_path": "BLENDER_PATH",
 }
 
+# Optional settings, mapped to their default. Absence must never block startup.
+_OPTIONAL = {
+    "mcp_grafana_path": ("MCP_GRAFANA_PATH", "mcp-grafana"),
+}
+
 
 @dataclass(frozen=True)
 class Config:
@@ -26,6 +31,7 @@ class Config:
     otlp_endpoint: str
     otlp_auth: str
     blender_path: str
+    mcp_grafana_path: str = "mcp-grafana"
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> "Config":
@@ -36,4 +42,6 @@ class Config:
             )
         values = {field: env[name].strip() for field, name in _FIELDS.items()}
         values["grafana_url"] = values["grafana_url"].rstrip("/")
+        for field, (name, default) in _OPTIONAL.items():
+            values[field] = (env.get(name) or default).strip()
         return cls(**values)

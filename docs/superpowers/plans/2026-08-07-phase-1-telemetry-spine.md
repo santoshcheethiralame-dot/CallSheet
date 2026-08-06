@@ -6,7 +6,7 @@
 
 **Architecture:** A Blender subprocess renders real frames. An OpenTelemetry layer records frame duration, memory and outcome as metrics, logs and spans, exporting over OTLP to Grafana Cloud. A separate MCP client process launches `mcp-grafana` over stdio and queries those same metrics back. The spike passes when a metric produced by an actual render is retrieved through the MCP server by code.
 
-**Tech Stack:** Python 3.11+, Blender 4.x (CLI, background mode), OpenTelemetry SDK + OTLP/HTTP exporter, `mcp` Python SDK, `mcp-grafana` (Go binary), Grafana Cloud free tier, pytest.
+**Tech Stack:** Python 3.12.10, Blender 5.2.0 (CLI, background mode), OpenTelemetry SDK 1.44 + OTLP/HTTP exporter, `mcp` Python SDK 2.0, `mcp-grafana` v1.0.0 (Go binary), Grafana Cloud free tier, pytest 8.3.
 
 ## Global Constraints
 
@@ -489,13 +489,21 @@ main()
 
 - [ ] **Step 2: Install Blender and generate the scenes**
 
-Install Blender 4.x from `https://www.blender.org/download/` (free). Then:
+Being installed via `winget install BlenderFoundation.Blender` — resolved to
+**Blender 5.2.0**, not the 4.x this script was written against. Confirm the
+install path, then set `BLENDER_PATH` in `.env` to the real `blender.exe`.
 
 ```bash
-& "C:\Program Files\Blender Foundation\Blender 4.2\blender.exe" -b -P scenes/make_scenes.py
+& "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" -b -P scenes/make_scenes.py
 ```
 
 Expected: `scenes/SH001.blend`, `SH002.blend`, `SH003.blend` and `manifest.json` exist.
+
+> **Verify the bpy API against 5.2 before trusting the generator.** The calls
+> most likely to have moved are `bpy.ops.mesh.primitive_ico_sphere_add`,
+> `scene.cycles.samples`, and `scene.cycles.use_denoising`. If the script errors,
+> read the traceback and adapt — do not assume the 4.x form still applies. A
+> quick check: `blender -b --python-expr "import bpy; print(bpy.app.version)"`.
 
 - [ ] **Step 3: Write the test**
 
@@ -883,11 +891,22 @@ the project.
 > still exist with these signatures. If 2.0 moved them, fix the imports here
 > before implementing — do not assume the code below compiles.
 
-- [ ] **Step 1: Install `mcp-grafana`**
+- [ ] **Step 1: Install `mcp-grafana`** — ✅ **already done**
 
-Download the release binary for Windows from
-`https://github.com/grafana/mcp-grafana/releases` and place it on `PATH`, or note
-its absolute path. Verify: `mcp-grafana --help` prints usage.
+`mcp-grafana` **v1.0.0** (Windows x86_64) is installed at
+`C:\Users\carbo\bin\mcp-grafana.exe`. It is *not* on `PATH`, so `.env` must set:
+
+```dotenv
+MCP_GRAFANA_PATH=C:/Users/carbo/bin/mcp-grafana.exe
+```
+
+`Config.mcp_grafana_path` defaults to the bare command `mcp-grafana` when that
+variable is blank, so a machine with it on `PATH` needs no configuration.
+
+Verified working: `& "C:\Users\carbo\bin\mcp-grafana.exe" --help` prints usage
+listing the tool groups, including `-disable-annotations`, `-disable-alerting`
+and `-disable-agento11y` — confirming the annotation-writing and alerting tools
+Phase 2 depends on are present in this build.
 
 - [ ] **Step 2: Write the failing test**
 
@@ -945,12 +964,9 @@ from mcp.client.stdio import stdio_client
 
 from callsheet.config import Config
 
-SERVER_COMMAND = "mcp-grafana"
-
-
 def _server_params(config: Config) -> StdioServerParameters:
     return StdioServerParameters(
-        command=SERVER_COMMAND,
+        command=config.mcp_grafana_path,
         args=[],
         env={
             **os.environ,
