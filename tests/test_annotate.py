@@ -2,12 +2,24 @@ import os
 
 import pytest
 
-from callsheet.annotate import build_annotation
+from callsheet.annotate import build_annotation, write_annotation
+from callsheet.config import Config
 from callsheet.decide import Action, Decision
 
 DECISION = Decision(
     summary="Preempting SH002 so SH001 makes the 09:00 review.",
     actions=[Action("SH002", "preempt", "already cut")],
+)
+# Keyword args deliberately, as in tests/test_round.py: Config's field order
+# changed once already, and positional construction would bind the wrong values.
+CONFIG = Config(
+    grafana_url="https://x.grafana.net",
+    grafana_token="glsa_abc",
+    otlp_endpoint="https://o/otlp",
+    otlp_auth="aGVsbG8=",
+    blender_path="blender.exe",
+    gemini_api_key="AIza_test",
+    mcp_grafana_path="mcp-grafana",
 )
 
 
@@ -26,6 +38,39 @@ def test_annotation_time_is_epoch_milliseconds():
 def test_annotation_is_tagged_for_retrieval():
     payload = build_annotation(DECISION, now_epoch_s=1_000_000)
     assert "callsheet" in payload["tags"]
+
+
+def test_annotation_states_when_the_gap_was_not_closed():
+    from callsheet.verify import Residual
+
+    payload = build_annotation(DECISION, now_epoch_s=1_000_000,
+                               residuals=[Residual("SH003", 66, False)])
+    assert "66" in payload["text"]
+    assert "not closed" in payload["text"].lower() or "still" in payload["text"].lower()
+
+
+@pytest.mark.asyncio
+async def test_write_annotation_passes_the_residual_through_to_the_payload():
+    """Guards against the builder knowing about gaps while the writer does not."""
+    from unittest.mock import AsyncMock, patch
+
+    from callsheet.verify import Residual
+
+    with patch("callsheet.annotate.call_tool", AsyncMock(return_value="ok")) as call:
+        await write_annotation(CONFIG, DECISION, 1_000_000,
+                               residuals=[Residual("SH003", 66, False)])
+
+    assert "66" in call.call_args[0][2]["text"]
+
+
+def test_a_rejected_action_is_not_reported_as_taken():
+    payload = build_annotation(
+        DECISION, 1_000_000,
+        applied=[],
+        rejections=[(DECISION.actions[0], "behind the at-risk shot")],
+    )
+    assert "REJECTED" in payload["text"]
+    assert "preempt SH002 (already cut)" not in payload["text"]
 
 
 @pytest.mark.integration

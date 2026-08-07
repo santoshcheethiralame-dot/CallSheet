@@ -87,3 +87,34 @@ async def test_an_annotation_failure_does_not_discard_the_decision():
     assert result.decision is decision, "the decision survives a failed write"
     assert result.annotation_written is False
     assert "503" in result.degraded_reason
+
+
+@pytest.mark.asyncio
+async def test_an_insufficient_decision_is_reported_as_such_not_as_success():
+    """The system must never claim to have fixed something it has not."""
+    state = FarmState(mean_frame_ms={("SH001", "final"): 60_000.0})
+    review = Review("R", NOW + 10, ["SH001"])
+    decision = Decision("done", [Action("SH001", "downgrade", "x")])
+
+    with patch("callsheet.round.read_farm_state", AsyncMock(return_value=state)), \
+         patch("callsheet.round.decide", return_value=decision), \
+         patch("callsheet.round.write_annotation", AsyncMock(return_value="ok")):
+        result = await run_round(CONFIG, SHOTS, review, now_epoch_s=NOW)
+
+    assert result.residuals
+    assert result.residuals[0].closed is False
+    assert result.residuals[0].shortfall_s > 0
+
+
+@pytest.mark.asyncio
+async def test_guard_rejected_actions_are_recorded_and_not_applied():
+    state = FarmState(mean_frame_ms={("SH001", "final"): 60_000.0})
+    review = Review("R", NOW + 10, ["SH001"])
+    decision = Decision("bad", [Action("SH001", "preempt", "sacrificing the required shot")])
+
+    with patch("callsheet.round.read_farm_state", AsyncMock(return_value=state)), \
+         patch("callsheet.round.decide", return_value=decision), \
+         patch("callsheet.round.write_annotation", AsyncMock(return_value="ok")):
+        result = await run_round(CONFIG, SHOTS, review, now_epoch_s=NOW)
+
+    assert result.guard_rejections, "preempting the at-risk shot must be rejected"
