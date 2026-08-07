@@ -461,4 +461,54 @@ console on a legacy codepage cannot kill the demo mid-sentence with a
 
 ---
 
+## 15. Phase 4 findings
+
+**The board is live.** Real rendered frames as shot thumbnails, a scheduling
+round every 30s against live Grafana and live Gemini, and the revision stock
+advancing on decisions. Verified in-browser: rev 0 white → rev 1 blue on the
+first decision, then held at rev 1 across three further rounds.
+
+**Key the revision on the plan, not on the prose.** Three consecutive rounds
+against an unchanged farm returned the identical plan — preempt SH002 — in three
+different sentences. Comparing decisions by summary advanced the revision every
+round, which turns the signature element into a clock and destroys its meaning.
+Two decisions are the same when their *applied action list* is the same.
+Rejected actions are excluded, so a decision the guard newly blocks does issue a
+revision: what the crew is told to do genuinely changed.
+
+**Named SSE events do not reach `onmessage`.** The server emits `event: state`;
+the page listened on `stream.onmessage`. Every update since the page was written
+went to the floor — it fetched once and then sat there looking live. A page that
+appears to work is worse than one that visibly fails.
+
+**An absolute path defeated the frames route.** Before the guard existed,
+`/frames/C:%5CWindows%5Cwin.ini` returned **200 with the real file**, because
+`Path.__truediv__` discards the left operand when the right is absolute. The
+plan's own traversal test (`..%2F..%2F.env`) proved nothing — it is decoded
+before routing and dies in the router whether or not a check exists. This would
+have shipped to a public URL.
+
+### The gap Phase 5 must close first
+
+**The board currently contradicts itself.** SH003's card reads `in_the_can 3/3`
+while the call sheet beside it says SH003 is 18s short. Two sources of truth for
+the same fact: cards count PNGs on disk, the forecaster reads
+`FarmState.frames_done`, which `parse_farm_state` deliberately never populates
+(§13 — telemetry answers *how fast*, the queue answers *what is left*). The
+queue built in Phase 3 is wired to nothing, so the forecaster re-plans a full
+nine-frame render every round and the shortfall it reports is synthetic.
+
+The fix is to make the queue the single source of progress: seed it from disk,
+have workers mark frames done, and feed `frames_done(conn)` into the round so
+the cards and the forecast read the same number.
+
+That has a consequence worth planning for rather than discovering: once progress
+is truthful, the existing renders make the board *finished*, and a finished
+board has nothing to demonstrate. The demo therefore needs a fresh night — clear
+the output, reset the queue, and let the board fill in as frames land. That is
+better footage anyway: a night starting empty and going wrong beats a night
+already over.
+
+---
+
 _Living doc. Update the same day a decision changes._
