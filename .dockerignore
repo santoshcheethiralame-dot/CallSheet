@@ -1,0 +1,11 @@
+.git
+.pytest_cache
+__pycache__
+*.egg-info
+.env
+out
+scenes/*.blend
+scenes/*.blend1
+callsheet.db
+docs
+tests

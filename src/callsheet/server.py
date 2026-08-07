@@ -33,6 +33,22 @@ log = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT_DIR = ROOT / "out"
+BAKED_DIR = ROOT / "demo" / "frames"
+"""Real frames from a real render, committed so a clone or a container has
+something to show. The hosted board does not run Blender — rendering is local
+work that produces telemetry, and the hosted surface is the agent reading that
+telemetry back."""
+
+
+def frames_dir() -> Path:
+    """Where frames are served from: a live render if there is one, else the
+    baked set. One directory at a time, never a search path — the traversal
+    guard is only sound because there is exactly one root to be inside of."""
+    if OUT_DIR.is_dir() and any(OUT_DIR.glob("*.png")):
+        return OUT_DIR
+    return BAKED_DIR
+
+
 PAGE = ROOT / "web" / "index.html"
 MANIFEST = ROOT / "scenes" / "manifest.json"
 REVIEW = ROOT / "review.json"
@@ -231,7 +247,7 @@ def frame(name: str) -> FileResponse:
     Outside and absent are both 404 on purpose: distinguishing them would turn
     the route into a way to ask what exists on the host.
     """
-    root = OUT_DIR.resolve()
+    root = frames_dir().resolve()
     try:
         candidate = (root / name).resolve()
         inside = candidate.is_relative_to(root) and candidate.is_file()

@@ -159,3 +159,53 @@ async def test_the_timer_hands_the_round_the_session_that_remembers():
                                 Review("Director review", 1_000_030, []))
 
     assert seen["reuse"] == session.reuse
+
+
+def test_frames_fall_back_to_the_baked_demo_set_when_nothing_has_been_rendered(tmp_path, monkeypatch):
+    """A container has no out/ - it ships with real frames from a real render."""
+    from callsheet import server
+
+    empty_out = tmp_path / "out"
+    empty_out.mkdir()
+    baked = tmp_path / "demo" / "frames"
+    baked.mkdir(parents=True)
+    (baked / "SH001_0001.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+
+    monkeypatch.setattr(server, "OUT_DIR", empty_out)
+    monkeypatch.setattr(server, "BAKED_DIR", baked)
+
+    assert server.frames_dir() == baked
+
+
+def test_a_live_render_takes_precedence_over_the_baked_set(tmp_path, monkeypatch):
+    from callsheet import server
+
+    live = tmp_path / "out"
+    live.mkdir()
+    (live / "SH001_0001.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    baked = tmp_path / "demo" / "frames"
+    baked.mkdir(parents=True)
+    (baked / "SH001_0001.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+
+    monkeypatch.setattr(server, "OUT_DIR", live)
+    monkeypatch.setattr(server, "BAKED_DIR", baked)
+
+    assert server.frames_dir() == live
+
+
+def test_the_traversal_guard_still_holds_against_the_fallback_directory(tmp_path, monkeypatch):
+    """Adding a second source must not add a second way out."""
+    from fastapi.testclient import TestClient
+
+    from callsheet import server
+
+    empty_out = tmp_path / "out"
+    empty_out.mkdir()
+    baked = tmp_path / "demo" / "frames"
+    baked.mkdir(parents=True)
+    (tmp_path / "secret.txt").write_text("no", encoding="utf-8")
+
+    monkeypatch.setattr(server, "OUT_DIR", empty_out)
+    monkeypatch.setattr(server, "BAKED_DIR", baked)
+
+    assert TestClient(server.app).get("/frames/..%5Csecret.txt").status_code == 404
