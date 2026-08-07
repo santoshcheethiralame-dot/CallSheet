@@ -271,3 +271,42 @@ def test_root_falls_back_to_the_counted_path_when_nothing_holds_the_page(monkeyp
     monkeypatch.chdir(elsewhere)
 
     assert _find_root(counted=counted) == counted
+
+
+def test_progress_is_counted_where_frames_are_actually_served(tmp_path, monkeypatch):
+    """A container has no out/ but ships demo frames, and they must count.
+
+    Counting only out/ meant every card read 0/3, and build_board only hands a
+    card a thumbnail once a frame is done - so the frames were served correctly
+    and never referenced. The board showed 'no frame' beside a working image URL.
+    """
+    from callsheet import server
+    from callsheet.domain import Shot
+
+    empty_out = tmp_path / "out"
+    empty_out.mkdir()
+    baked = tmp_path / "demo" / "frames"
+    baked.mkdir(parents=True)
+    for frame in (1, 2):
+        (baked / f"SH001_000{frame}.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+
+    monkeypatch.setattr(server, "OUT_DIR", empty_out)
+    monkeypatch.setattr(server, "BAKED_DIR", baked)
+
+    assert server.frames_on_disk([Shot("SH001", "a.blend", 16, [1, 2, 3])]) == {"SH001": 2}
+
+
+def test_a_board_with_no_round_running_does_not_claim_the_review_is_safe(monkeypatch):
+    """No forecast is not the same as a good forecast.
+
+    Without credentials nothing is computed, and the summary still read 'Every
+    required shot makes the review' - a verdict with nothing behind it, on the
+    one surface a judge reads first.
+    """
+    from callsheet import server
+
+    monkeypatch.setattr(server, "_session", None)
+    board = server.current_board()
+
+    assert "makes the review" not in board.summary
+    assert board.degraded_reason, "the page must say why nothing is happening"

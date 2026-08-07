@@ -120,9 +120,15 @@ def frames_on_disk(shots: list[Shot]) -> dict[str, int]:
     which is the queue; this one exists so a judge with an empty `.env` still
     gets cards that match the pixels.
     """
-    if not OUT_DIR.is_dir():
+    # Counted from wherever frames are actually being served, not from out/.
+    # A container has no out/ and ships the baked set, so counting out/ meant
+    # every card read 0/3 — and `build_board` only gives a card a thumbnail once
+    # a frame is done. The frames were served correctly and never referenced:
+    # the board printed "no frame" beside a URL that returned a real image.
+    where = frames_dir()
+    if not where.is_dir():
         return {}
-    return {shot.id: len(list(OUT_DIR.glob(f"{shot.id}_*.png"))) for shot in shots}
+    return {shot.id: len(list(where.glob(f"{shot.id}_*.png"))) for shot in shots}
 
 
 async def run_rounds(config: Config, session: Session, shots: list[Shot],
@@ -217,8 +223,22 @@ def current_board() -> BoardState:
     review = (load_review(str(REVIEW)) if REVIEW.exists()
               else Review("No review scheduled", 0, []))
 
-    return build_board(shots, review, [], now_epoch_s=review.deadline_epoch_s,
-                       frames_done=frames_on_disk(shots))
+    board = build_board(shots, review, [], now_epoch_s=review.deadline_epoch_s,
+                        frames_done=frames_on_disk(shots))
+
+    # `build_board` summarises a forecast, and on this path there is no forecast
+    # — so its cheerful default, "Every required shot makes the review", is a
+    # verdict with nothing behind it. It was rendering on the deployed board with
+    # no credentials set, which is exactly the unearned claim the rest of this
+    # system exists to refuse. Say what is actually true instead.
+    return dataclasses.replace(
+        board,
+        summary="No scheduling round is running. This is tonight's shot list, "
+                "not a forecast.",
+        degraded_reason="No credentials configured, so nothing is being "
+                        "forecast or decided. The shot list and rendered frames "
+                        "are real.",
+    )
 
 
 @app.get("/", response_class=HTMLResponse)
