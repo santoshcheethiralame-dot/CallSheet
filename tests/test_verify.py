@@ -1,6 +1,6 @@
 from callsheet.decide import Action
 from callsheet.domain import FarmState, Review, Shot
-from callsheet.verify import verify
+from callsheet.verify import Residual, verdict, verify
 
 NOW = 1_000_000
 SHOTS = [
@@ -71,3 +71,30 @@ def test_the_queue_the_verifier_was_given_is_left_alone():
     review = Review("R", NOW + 30, ["SH003"])
     verify(SHOTS, [Action("SH002", "preempt", "x")], review, STATE, NOW)
     assert [shot.id for shot in SHOTS] == ["SH001", "SH002", "SH003"]
+
+
+def test_verdict_says_the_gap_closed_when_every_required_shot_makes_it():
+    line = verdict([Residual("SH001", 0, True), Residual("SH003", 0, True)])
+    assert line == "PASS: the plan closes the deadline gap."
+
+
+def test_verdict_names_the_shot_and_the_seconds_still_missing():
+    line = verdict([Residual("SH001", 0, True), Residual("SH003", 66, False)])
+    assert "NOT closed" in line
+    assert "SH003 by 66s" in line
+    assert "SH001" not in line, "a shot that made it is not part of the shortfall"
+
+
+def test_verdict_lists_every_unclosed_shot():
+    line = verdict([Residual("SH002", 12, False), Residual("SH003", 66, False)])
+    assert "SH002 by 12s" in line
+    assert "SH003 by 66s" in line
+
+
+def test_an_empty_residual_list_is_not_reported_as_a_success():
+    """No residuals means nothing was checked, which is not the same as nothing
+    being wrong. Printing the success line here would be the exact false claim
+    this phase exists to remove."""
+    line = verdict([])
+    assert "closes the deadline gap" not in line
+    assert "no required shot was at risk" in line.lower()

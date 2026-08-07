@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 from callsheet.config import Config, ConfigError
 from callsheet.domain import load_review, load_shots
 from callsheet.round import run_round
+from callsheet.verify import verdict
 
 DEADLINE_SECONDS = 30      # tight on purpose: SH003 alone takes ~80s
 
@@ -79,16 +80,10 @@ def main() -> int:
 
     print(f"\nannotation written: {result.annotation_written}")
 
-    # Both branches are exit 0. The system's job here is to tell the truth about
-    # the outcome, not to guarantee a good one.
-    closed = all(residual.closed for residual in result.residuals)
-    if closed:
-        print("\nPASS: the plan closes the deadline gap.")
-    else:
-        short = ", ".join(
-            f"{r.shot_id} by {r.shortfall_s}s" for r in result.residuals if not r.closed
-        )
-        print(f"\nPASS: loop completed and reported honestly — gap NOT closed ({short}).")
+    # Every branch is exit 0. The system's job here is to tell the truth about
+    # the outcome, not to guarantee a good one. The sentence itself is built in
+    # `verify.verdict` so it can be tested without running the demo by hand.
+    print(f"\n{verdict(result.residuals)}")
     return 0
 
 

@@ -57,3 +57,23 @@ def verify(
         residuals.append(Residual(shot_id, shortfall, closed=shortfall == 0))
 
     return residuals
+
+
+def verdict(residuals: list[Residual]) -> str:
+    """The one line that states the outcome. Lives here, not in the demo script.
+
+    Built inline in `demo_round.py` this sentence was the only part of the system
+    with no test behind it, and it is the part a judge reads. A regression here
+    turns an honest failure into a claimed success and nothing would catch it.
+    """
+    if not residuals:
+        # Nothing was checked, which is not the same as nothing being wrong. The
+        # success line here would be a claim about work that was never verified.
+        return "PASS: loop completed — no required shot was at risk, so no gap was checked."
+
+    unclosed = [residual for residual in residuals if not residual.closed]
+    if not unclosed:
+        return "PASS: the plan closes the deadline gap."
+
+    short = ", ".join(f"{r.shot_id} by {r.shortfall_s}s" for r in unclosed)
+    return f"PASS: loop completed and reported honestly — gap NOT closed ({short})."
