@@ -13,6 +13,7 @@ scrolls without saying anything. Both would look alive and mean nothing.
 
 from __future__ import annotations
 
+import os
 import sqlite3
 import time
 from collections.abc import Mapping, Sequence
@@ -27,9 +28,14 @@ from callsheet.guard import surviving
 from callsheet.round import RoundResult
 
 ROOT = Path(__file__).resolve().parents[2]
-DB_PATH = ROOT / "callsheet.db"
+DB_PATH = Path(os.environ.get("CALLSHEET_DB", ROOT / "callsheet.db"))
 """The night's queue, on disk rather than in memory: a server restarted at 2am
-must not forget what has already rendered."""
+must not forget what has already rendered.
+
+Overridable because container hosts do not all give the application directory
+back as writable — Hugging Face Spaces runs Docker images as uid 1000 against a
+root-owned tree, so the default path is read-only there and the night would die
+on its first write. `CALLSHEET_DB=/tmp/callsheet.db` is the deployment answer."""
 
 MAX_EVENTS = 200
 """The feed shows the most recent handful; this is the tail the server keeps.
