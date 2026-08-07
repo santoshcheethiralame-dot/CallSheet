@@ -118,3 +118,11 @@ async def test_guard_rejected_actions_are_recorded_and_not_applied():
         result = await run_round(CONFIG, SHOTS, review, now_epoch_s=NOW)
 
     assert result.guard_rejections, "preempting the at-risk shot must be rejected"
+
+    # Recording the rejection is half the claim. The other half is that the
+    # action never reached the queue, and only the residual can show it: SH001
+    # has 3 frames at 60s, so it lands 170s past a 10s deadline. Had the preempt
+    # been applied the shot would be gone from the queue and `verify` would
+    # report the -1 sentinel instead — a required shot that never renders.
+    assert [(r.shot_id, r.shortfall_s, r.closed) for r in result.residuals] == \
+        [("SH001", 170, False)]
