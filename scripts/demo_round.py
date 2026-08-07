@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 
 from callsheet.config import Config, ConfigError
 from callsheet.domain import load_review, load_shots
+from callsheet.guard import surviving
 from callsheet.round import run_round
 from callsheet.verify import verdict
 
@@ -61,8 +62,11 @@ def main() -> int:
         print("FAIL: no miss forecast — the deadline was not tight enough to exercise the agent")
         return 3
 
+    # Only what the guard let through. Printing every proposed action here put a
+    # rejected one in the call sheet as though it had been taken, contradicting
+    # both the REJECTED lines below it and the annotation Grafana receives.
     print(f"\nCALL SHEET: {result.decision.summary}")
-    for action in result.decision.actions:
+    for action in surviving(result.decision.actions, result.guard_rejections):
         print(f"  {action.action.upper():10} {action.shot_id} — {action.reason}")
 
     # A guard that fires silently teaches a viewer nothing. Rejected actions are

@@ -1,6 +1,6 @@
 from callsheet.decide import Action
 from callsheet.forecast import Forecast
-from callsheet.guard import rejected
+from callsheet.guard import rejected, surviving
 
 # Queue order: SH001 (index 0), SH002 (1), SH003 (2, at risk)
 FORECASTS = [
@@ -66,3 +66,27 @@ def test_each_action_is_judged_on_its_own_merits():
 def test_nothing_is_rejected_for_queue_position_when_the_at_risk_shot_is_unknown():
     """With no anchor there is no position to reason about; don't invent one."""
     assert rejected([Action("SH002", "preempt", "cut")], FORECASTS, "SH404") == []
+
+
+def test_surviving_returns_only_the_actions_the_guard_let_through():
+    keep = Action("SH002", "preempt", "cut")
+    drop = Action("SH003", "preempt", "x")
+    assert surviving([keep, drop], [(drop, "the at-risk shot itself")]) == [keep]
+
+
+def test_surviving_keeps_an_identical_twin_of_a_rejected_action():
+    """`Action` is a frozen dataclass, so two distinct actions with the same
+    fields compare equal. Filtering by equality would delete a legitimate action
+    that merely looks like a rejected one."""
+    blocked = Action("SH003", "preempt", "x")
+    twin = Action("SH003", "preempt", "x")
+
+    result = surviving([twin, blocked], [(blocked, "the at-risk shot itself")])
+
+    assert len(result) == 1
+    assert result[0] is twin
+
+
+def test_surviving_nothing_rejected_is_the_whole_list():
+    actions = [Action("SH002", "preempt", "cut")]
+    assert surviving(actions, []) == actions

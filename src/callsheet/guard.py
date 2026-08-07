@@ -56,3 +56,16 @@ def rejected(
             ))
 
     return problems
+
+
+def surviving(
+    actions: list[Action], rejections: list[tuple[Action, str]]
+) -> list[Action]:
+    """The actions the guard let through — the ones that are actually taken.
+
+    Identity, not equality. `Action` is a frozen dataclass, so two distinct
+    actions with identical fields compare equal, and an equality filter would
+    drop a legitimate action that merely matched a rejected one.
+    """
+    blocked = {id(action) for action, _ in rejections}
+    return [action for action in actions if id(action) not in blocked]

@@ -10,7 +10,7 @@ from callsheet.decide import Action, Decision, decide
 from callsheet.domain import Review, Shot
 from callsheet.farm_state import read_farm_state
 from callsheet.forecast import Forecast, forecast_all, misses
-from callsheet.guard import rejected
+from callsheet.guard import rejected, surviving
 from callsheet.verify import Residual, verify
 
 
@@ -57,11 +57,7 @@ async def run_round(config: Config, shots: list[Shot], review: Review,
     at_risk = missing[0].shot_id
 
     guard_rejections = rejected(decision.actions, forecasts, at_risk)
-    # Identity, not equality. `Action` is a frozen dataclass, so two distinct
-    # actions with identical fields compare equal, and membership testing would
-    # drop a legitimate action that merely matched a rejected one.
-    blocked = {id(action) for action, _ in guard_rejections}
-    allowed = [action for action in decision.actions if id(action) not in blocked]
+    allowed = surviving(decision.actions, guard_rejections)
     residuals = verify(shots, allowed, review, state, now_epoch_s)
 
     # The write is wrapped too. A Grafana blip must not discard a forecast and a
