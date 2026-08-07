@@ -74,6 +74,19 @@ def mark_done(conn: sqlite3.Connection, shot_id: str, frame: int) -> None:
     conn.commit()
 
 
+def mark_undone(conn: sqlite3.Connection, shot_id: str, frame: int) -> None:
+    """Return a finished frame to pending, because its output is gone.
+
+    Only ever applied to rows currently `done`: a preempted job is a production
+    decision and must not be resurrected by a file going missing.
+    """
+    conn.execute(
+        "UPDATE jobs SET state = 'pending' WHERE shot_id = ? AND frame = ? AND state = 'done'",
+        (shot_id, frame),
+    )
+    conn.commit()
+
+
 def frames_done(conn: sqlite3.Connection) -> dict[str, int]:
     """Completed frames per shot, in the shape `FarmState.frames_done` expects."""
     rows = conn.execute(

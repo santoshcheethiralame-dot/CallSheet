@@ -127,11 +127,43 @@ def open_night(shots: Sequence[Shot], out_dir: Path,
     conn = sqlite3.connect(path, check_same_thread=False)
     queue.init_db(conn)
     queue.enqueue_manifest(conn, list(shots))
-    for shot in shots:
-        for frame in shot.frames:
-            if (Path(out_dir) / f"{shot.id}_{frame:04d}.png").exists():
-                queue.mark_done(conn, shot.id, frame)
+    reconcile_with_disk(conn, shots, out_dir)
     return conn
+
+
+def reconcile_with_disk(conn: sqlite3.Connection, shots: Sequence[Shot],
+                        out_dir: Path) -> list[tuple[str, int]]:
+    """Mark done every pending frame whose PNG has appeared. Returns what landed.
+
+    Called once at boot and again every round. Once-at-boot was not enough: a
+    frame finishing mid-night stayed invisible until a restart, so the board
+    showed a farm that never progressed while Blender worked behind it. A board
+    that cannot show work arriving is not a board.
+
+    It syncs **both** ways. An earlier version only ever marked frames done, on
+    the rule that disk seeds the queue once and the queue answers thereafter.
+    Deleting the rendered frames proved that wrong: the queue went on claiming a
+    shot was complete, the board pointed a thumbnail at a file that no longer
+    existed, and the row rendered as a broken image. On whether a frame exists,
+    the disk is the authority.
+
+    A `preempted` row is left alone either way — that state is a production
+    decision, not an observation, and a missing file must not overturn it.
+    """
+    out = Path(out_dir)
+    landed = []
+
+    for job in queue.snapshot(conn):
+        if job.state == "preempted":
+            continue
+        exists = (out / f"{job.shot_id}_{job.frame:04d}.png").exists()
+        if exists and job.state != "done":
+            queue.mark_done(conn, job.shot_id, job.frame)
+            landed.append((job.shot_id, job.frame))
+        elif not exists and job.state == "done":
+            queue.mark_undone(conn, job.shot_id, job.frame)
+
+    return landed
 
 
 class Session:
@@ -190,6 +222,16 @@ class Session:
         of a shot is finished when they are reading one number.
         """
         return queue.frames_done(self.conn) if self.conn is not None else {}
+
+    def catch_up(self, shots: Sequence[Shot], out_dir: Path) -> list[tuple[str, int]]:
+        """Take in any frame that has landed since the last round.
+
+        A no-op with no queue, so a session running without one degrades to
+        showing no progress rather than raising.
+        """
+        if self.conn is None:
+            return []
+        return reconcile_with_disk(self.conn, shots, out_dir)
 
     def say(self, text: str, at_epoch_s: int) -> None:
         self.events.append(BoardEvent(at_epoch_s, text))

@@ -94,6 +94,12 @@ async def run_rounds(config: Config, session: Session, shots: list[Shot],
         now = int(time.time())
         tonight = dataclasses.replace(review, deadline_epoch_s=now + DEADLINE_S)
 
+        # Pick up any frame that landed since the last round, before reading
+        # progress. Reconciling only at boot left the board frozen while Blender
+        # worked behind it.
+        for shot_id, frame in session.catch_up(shots, OUT_DIR):
+            session.say(f"{shot_id} frame {frame} rendered", now)
+
         # Read once, hand to both. The forecast and the cards disagreeing about
         # how much of a shot is finished was the board's self-contradiction;
         # they cannot disagree about a number they were both handed.

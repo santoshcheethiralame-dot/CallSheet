@@ -5,7 +5,7 @@ from callsheet.decide import Action, Decision
 from callsheet.domain import Review, Shot
 from callsheet.forecast import Forecast
 from callsheet.round import RoundResult
-from callsheet.session import Session, open_night, situation
+from callsheet.session import Session, open_night, reconcile_with_disk, situation
 from callsheet.verify import Residual
 
 NOW = 1_000_000
@@ -234,9 +234,20 @@ def test_the_queue_is_reconciled_with_the_frames_already_on_disk(tmp_path):
     assert session.progress() == {"SH001": 2}
 
 
-def test_reopening_the_queue_does_not_lose_work_whose_frames_are_gone(tmp_path):
-    """Disk seeds the queue once. After that the queue is the answer, and a
-    frame deleted out from under it does not undo the work it records."""
+def test_a_frame_whose_output_is_gone_is_no_longer_finished(tmp_path):
+    """The disk is the authority on whether a frame exists.
+
+    This reverses an earlier rule — "disk seeds the queue once, the queue
+    answers thereafter" — which was wrong in a way the board made obvious. With
+    the frames deleted, the queue went on reporting a shot complete, and the row
+    pointed its thumbnail at a file that was not there and rendered as a broken
+    image. A render farm's output *is* the file; claiming the work is finished
+    when its artifact is gone is the same dishonesty as claiming a deadline was
+    met when it was missed.
+
+    Nothing is lost by this. Clearing the night on purpose goes through
+    `fresh_night.py`, which resets the frames and the queue together.
+    """
     out = tmp_path / "out"
     out.mkdir()
     (out / "SH001_0001.png").write_bytes(b"\x89PNG")
@@ -246,7 +257,26 @@ def test_reopening_the_queue_does_not_lose_work_whose_frames_are_gone(tmp_path):
     (out / "SH001_0001.png").unlink()
     session = Session(conn=open_night(SHOTS, out, db))
 
-    assert session.progress() == {"SH001": 1}
+    assert session.progress() == {}, "a frame with no file is not a finished frame"
+
+
+def test_a_preempted_frame_is_not_resurrected_by_its_file_appearing(tmp_path):
+    """Preemption is a production decision, not an observation of the disk."""
+    import sqlite3
+
+    from callsheet import queue as q
+
+    out = tmp_path / "out"
+    out.mkdir()
+    conn = sqlite3.connect(":memory:")
+    q.init_db(conn)
+    q.enqueue_manifest(conn, SHOTS)
+    conn.execute("UPDATE jobs SET state = 'preempted' WHERE shot_id = 'SH001'")
+    conn.commit()
+
+    (out / "SH001_0001.png").write_bytes(b"\x89PNG")
+    assert reconcile_with_disk(conn, SHOTS, out) == []
+    assert q.frames_done(conn) == {}
 
 
 def test_a_session_with_no_queue_behind_it_reports_no_progress():
@@ -332,3 +362,42 @@ def test_events_survive_across_rounds():
     board = record(session, a_round(decision=PREEMPT_SH002))
 
     assert board.events[0].text == "SH001 frame 3 rendered"
+
+
+def test_a_frame_that_lands_mid_night_is_picked_up_without_a_restart(tmp_path):
+    """Reconciling only at boot left the board frozen while Blender worked."""
+    import sqlite3
+
+    from callsheet.domain import Shot
+    from callsheet.session import Session, reconcile_with_disk
+    from callsheet import queue as q
+
+    shots = [Shot("SH001", "a.blend", 16, [1, 2])]
+    out = tmp_path / "out"
+    out.mkdir()
+
+    conn = sqlite3.connect(":memory:")
+    q.init_db(conn)
+    q.enqueue_manifest(conn, shots)
+    session = Session(conn=conn)
+
+    assert session.catch_up(shots, out) == [], "nothing has rendered yet"
+
+    (out / "SH001_0001.png").write_bytes(b"png")
+    assert session.catch_up(shots, out) == [("SH001", 1)]
+    assert session.progress() == {"SH001": 1}
+
+    # Idempotent: the same frame is not news twice.
+    assert session.catch_up(shots, out) == []
+
+    (out / "SH001_0002.png").write_bytes(b"png")
+    assert session.catch_up(shots, out) == [("SH001", 2)]
+    assert session.progress() == {"SH001": 2}
+
+
+def test_catch_up_without_a_queue_is_a_no_op():
+    from pathlib import Path as P
+
+    from callsheet.session import Session
+
+    assert Session().catch_up([], P("nowhere")) == []

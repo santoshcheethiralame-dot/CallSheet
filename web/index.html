@@ -8,33 +8,34 @@
 /* ---------------------------------------------------------------------------
    CALLSHEET
 
-   The page is a call sheet being amended in real time.
+   The page IS the call sheet, on a desk in a dark suite at 2am.
 
-   Film call sheets are reissued on coloured paper as they are revised: white,
-   then blue, then pink, then goldenrod. Every crew member knows that holding
-   goldenrod means the day has gone badly. Each agent decision issues a new
-   revision and advances the stock. That is the one loud thing here; everything
-   else stays quiet.
+   Film call sheets are reissued on coloured paper as the day is revised:
+   white, then blue, then pink, then goldenrod. Every crew member knows that
+   holding goldenrod means it has gone badly. Each decision the agent makes
+   reissues the sheet and advances the stock — and the reissue happens on
+   screen, because that is the one moment worth watching here.
+
+   Everything else stays quiet.
    --------------------------------------------------------------------------- */
 
 :root {
-  --suite-black: #14171A;   /* the room: a monitor at 2am */
-  --suite-panel: #1C2126;
-  --suite-line:  #2A3138;
-  --stock-white: #EDE9DE;   /* revision 0 — the paper */
-  --stock-blue:  #8FB8D6;   /* revision 1 */
-  --stock-pink:  #E39BAE;   /* revision 2 */
-  --stock-gold:  #D9A441;   /* revision 3+, and the at-risk colour */
-  --grease:      #B33A2B;   /* grease pencil: struck, missing */
-  --in-the-can:  #6E9E7B;
-  --ink:         #0E1113;
-  --ink-soft:    #6B7379;
+  --suite-black: #14171A;
+  --suite-line:  #262D34;
+  --stock-white: #EDE9DE;
+  --stock-blue:  #9CC0DA;
+  --stock-pink:  #E7A6B7;
+  --stock-gold:  #DFAE52;
+  --grease:      #A8331F;
+  --in-the-can:  #4C6B55;
+  --ink:         #14181B;
+  --ink-mid:     rgba(20, 24, 27, 0.62);
+  --ink-faint:   rgba(20, 24, 27, 0.28);
+  --dark-soft:   #6B7379;
 
   --display: "Bahnschrift", "Archivo Narrow", "Haettenschweiler", Impact, sans-serif;
   --mono: ui-monospace, "Cascadia Mono", Consolas, "SF Mono", monospace;
   --body: system-ui, -apple-system, "Segoe UI", sans-serif;
-
-  --gap: 20px;
 }
 
 * { box-sizing: border-box; }
@@ -49,507 +50,495 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-:focus-visible {
-  outline: 2px solid var(--stock-gold);
-  outline-offset: 3px;
-}
+:focus-visible { outline: 2px solid var(--stock-gold); outline-offset: 3px; }
 
-.eyebrow {
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--ink-soft);
-  margin: 0 0 14px;
-  font-weight: 400;
-}
-
-/* --- slate header ---------------------------------------------------------- */
+/* --- the slate: everything that is not the sheet ---------------------------- */
 
 .slate {
   display: flex;
   align-items: baseline;
-  gap: 28px;
-  flex-wrap: wrap;
-  padding: 18px 28px;
+  gap: 22px;
+  padding: 14px 26px;
   border-bottom: 1px solid var(--suite-line);
-  background: linear-gradient(180deg, #191D21, var(--suite-black));
 }
 
 .slate__mark {
   font-family: var(--display);
-  font-size: 30px;
-  letter-spacing: 0.14em;
+  font-size: 22px;
+  letter-spacing: 0.22em;
   text-transform: uppercase;
-  font-weight: 600;
 }
 
 .slate__review {
   font-family: var(--mono);
-  font-size: 12px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--ink-soft);
-}
-
-.slate__rev {
-  font-family: var(--mono);
   font-size: 11px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  padding: 4px 10px;
-  color: var(--ink);
-  background: var(--stock-white);
+  color: var(--dark-soft);
 }
 
 .slate__clock {
   margin-left: auto;
   font-family: var(--mono);
-  font-size: 26px;
+  font-size: 22px;
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.04em;
 }
 
-.slate__clock[data-late="true"] { color: var(--grease); }
+.slate__clock[data-late="true"] { color: var(--stock-gold); }
 
-/* --- layout ---------------------------------------------------------------- */
+.banner {
+  display: none;
+  margin: 14px 26px 0;
+  padding: 9px 14px;
+  border-left: 3px solid var(--stock-gold);
+  background: rgba(223, 174, 82, 0.09);
+  font-size: 13px;
+}
 
-main {
+.banner[data-show="true"] { display: block; }
+
+/* --- the desk --------------------------------------------------------------- */
+
+.desk {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
-  gap: 32px;
-  padding: 26px 28px 40px;
-  align-items: start;
+  grid-template-columns: minmax(0, 1fr) 268px;
+  gap: 30px;
+  /* Centred, so a short sheet sits on the desk rather than clinging to the top
+     with a field of empty dark below it. A long sheet grows past centre and the
+     page simply scrolls. */
+  align-items: center;
+  padding: 26px;
+  max-width: 1240px;
+  margin: 0 auto;
+  min-height: calc(100vh - 52px);
 }
 
-/* --- shot cards ------------------------------------------------------------ */
+/* --- the sheet -------------------------------------------------------------- */
 
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
-  gap: var(--gap);
-}
-
-.card {
+.sheet {
   position: relative;
-  background: var(--suite-panel);
-  border: 1px solid var(--suite-line);
-  border-radius: 2px;
-  overflow: hidden;
+  background: var(--stock-white);
+  color: var(--ink);
+  padding: 34px 38px 30px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55), 0 2px 0 rgba(0, 0, 0, 0.3);
+  /* Paper is not flat. A whisper of tooth, not a texture effect. */
+  background-image:
+    repeating-linear-gradient(0deg, rgba(0,0,0,0.014) 0 1px, transparent 1px 3px);
 }
 
-.card[data-state="at_risk"] { border-color: var(--stock-gold); }
-.card[data-state="in_the_can"] { border-color: #24312A; }
-.card[data-state="struck"] { opacity: 0.55; }
+.sheet[data-stock="blue"] { background-color: var(--stock-blue); }
+.sheet[data-stock="pink"] { background-color: var(--stock-pink); }
+.sheet[data-stock="goldenrod"] { background-color: var(--stock-gold); }
 
-.card__frame {
-  display: block;
-  width: 100%;
+/* The reissue: the whole sheet is replaced, and you see it happen. */
+.sheet--issuing { animation: reissue 560ms cubic-bezier(.16,.84,.36,1) both; }
+
+@keyframes reissue {
+  0%   { transform: translateY(-14px) rotate(-0.7deg); opacity: 0; }
+  55%  { transform: translateY(2px) rotate(0.15deg); opacity: 1; }
+  100% { transform: none; }
+}
+
+.sheet__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  margin-bottom: 22px;
+}
+
+.sheet__title {
+  font-family: var(--display);
+  font-size: 34px;
+  line-height: 1;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  margin: 0 0 6px;
+}
+
+.sheet__meta {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-mid);
+}
+
+.stamp {
+  margin-left: auto;
+  flex: none;
+  transform: rotate(-6deg);
+  border: 2.5px solid rgba(20, 24, 27, 0.5);
+  color: rgba(20, 24, 27, 0.62);
+  font-family: var(--display);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-align: center;
+  padding: 7px 13px 6px;
+}
+
+.stamp__n { display: block; font-size: 25px; line-height: 1; }
+.stamp__stock { display: block; font-size: 10px; letter-spacing: 0.2em; margin-top: 2px; }
+
+/* --- the shot table: rows on a document, numbered ---------------------------- */
+
+.cols,
+.row {
+  display: grid;
+  grid-template-columns: 28px 132px minmax(0, 1fr) 66px 62px minmax(0, 1.05fr);
+  gap: 18px;
+  align-items: center;
+}
+
+.cols {
+  font-family: var(--display);
+  font-size: 10px;
+  letter-spacing: 0.19em;
+  text-transform: uppercase;
+  color: var(--ink-mid);
+  padding-bottom: 7px;
+  border-bottom: 1.5px solid rgba(20, 24, 27, 0.55);
+}
+
+.row {
+  position: relative;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--ink-faint);
+}
+
+.row__n {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-mid);
+}
+
+.row__frame {
+  width: 132px;
   aspect-ratio: 16 / 9;
   object-fit: cover;
-  background: #0B0D0F;
+  display: block;
+  background: rgba(20, 24, 27, 0.14);
 }
 
-.card__frame--empty {
+.row__frame--empty {
   display: grid;
   place-items: center;
   font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.16em;
-  color: #39424A;
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  color: var(--ink-mid);
 }
 
-.card__body { padding: 12px 14px 14px; }
+.row__shot { font-family: var(--mono); font-size: 15px; letter-spacing: 0.05em; }
 
-.card__id {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  font-family: var(--mono);
-  font-size: 14px;
-  letter-spacing: 0.06em;
-}
-
-.card__quality {
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--ink-soft);
-}
-
-/* One segment per frame: a coordinator counts frames, not percentages. */
-.card__frames {
-  display: flex;
-  gap: 3px;
-  margin: 11px 0 9px;
-}
-
-.card__seg {
-  height: 4px;
-  flex: 1;
-  background: #2E353C;
-}
-
-.card__seg[data-done="true"] { background: var(--in-the-can); }
-.card[data-state="at_risk"] .card__seg[data-done="true"] { background: var(--stock-gold); }
-
-.card__eta {
+.row__quality,
+.row__count {
   font-family: var(--mono);
   font-size: 11px;
-  letter-spacing: 0.06em;
-  color: var(--ink-soft);
+  color: var(--ink-mid);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
-.card[data-state="at_risk"] .card__eta { color: var(--stock-gold); }
-.card[data-state="in_the_can"] .card__eta { color: var(--in-the-can); }
+.row__status {
+  font-family: var(--display);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
 
-.card__strike {
+.row[data-state="in_the_can"] .row__status { color: var(--in-the-can); }
+.row[data-state="at_risk"] .row__status { color: var(--grease); }
+.row[data-state="struck"] { opacity: 0.5; }
+
+/* Goldenrod marks the shot that put the day on goldenrod paper. */
+.row[data-state="at_risk"]::before {
+  content: "";
   position: absolute;
-  inset: 0;
+  left: -38px;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  background: var(--grease);
+}
+
+.row__strike {
+  position: absolute;
+  left: -6px;
+  right: -6px;
+  top: 0;
+  bottom: 0;
   pointer-events: none;
 }
 
-.card__strike path {
+.row__strike path {
   stroke: var(--grease);
-  stroke-width: 5;
+  stroke-width: 2.5;
   stroke-linecap: round;
   fill: none;
-  opacity: 0.85;
-  stroke-dasharray: 420;
-  stroke-dashoffset: 420;
-  animation: strike 420ms ease-out forwards;
+  opacity: 0.9;
+  stroke-dasharray: 620;
+  stroke-dashoffset: 620;
+  animation: strike 520ms ease-out forwards;
 }
 
 @keyframes strike { to { stroke-dashoffset: 0; } }
 
-/* --- the paper ------------------------------------------------------------- */
+/* --- the amendment ---------------------------------------------------------- */
 
-.rail { display: grid; gap: var(--gap); }
+.amend { margin-top: 26px; }
 
-.paper {
-  position: relative;
-  background: var(--stock-white);
-  color: var(--ink);
-  padding: 22px 22px 20px;
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
-}
-
-.paper[data-stock="blue"] { background: var(--stock-blue); }
-.paper[data-stock="pink"] { background: var(--stock-pink); }
-.paper[data-stock="goldenrod"] { background: var(--stock-gold); }
-
-.paper__stamp {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  transform: rotate(-7deg);
-  border: 2px solid rgba(14, 17, 19, 0.55);
-  color: rgba(14, 17, 19, 0.7);
-  font-family: var(--mono);
-  font-size: 9px;
-  line-height: 1.25;
-  letter-spacing: 0.12em;
-  text-align: center;
-  text-transform: uppercase;
-  padding: 5px 8px;
-}
-
-.paper__title {
+.amend__label {
   font-family: var(--display);
-  font-size: 19px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  margin: 0 0 3px;
-  max-width: 60%;
-}
-
-.paper__rule {
-  border: 0;
-  border-top: 1px solid rgba(14, 17, 19, 0.28);
-  margin: 14px 0 13px;
-}
-
-.paper__summary { margin: 0; font-size: 14px; }
-
-.paper__action {
-  display: flex;
-  gap: 10px;
-  font-family: var(--mono);
-  font-size: 12px;
-  margin-top: 9px;
-}
-
-.paper__verb {
-  min-width: 74px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-.paper__reason { color: rgba(14, 17, 19, 0.72); }
-
-.paper__action--rejected .paper__verb,
-.paper__action--rejected .paper__reason {
-  color: rgba(14, 17, 19, 0.45);
-  text-decoration: line-through;
-}
-
-.paper__gap {
-  margin-top: 14px;
-  padding-top: 12px;
-  border-top: 2px solid var(--grease);
-  color: var(--grease);
-  font-family: var(--mono);
-  font-size: 12px;
-  letter-spacing: 0.04em;
-}
-
-.paper__gap strong {
-  display: block;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
   font-size: 11px;
-  margin-bottom: 3px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-mid);
+  margin-bottom: 8px;
 }
 
-/* --- event feed ------------------------------------------------------------ */
+.amend__summary { margin: 0 0 12px; font-size: 15px; max-width: 62ch; }
 
-.feed { border-top: 1px solid var(--suite-line); padding-top: 16px; }
-
-.feed__list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+.act {
   display: grid;
-  gap: 7px;
-  max-height: 280px;
-  overflow-y: auto;
-}
-
-.feed__item {
-  display: flex;
-  gap: 12px;
-  font-size: 13px;
-}
-
-.feed__time {
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 14px;
   font-family: var(--mono);
-  font-size: 11px;
-  color: var(--ink-soft);
-  flex: none;
-  padding-top: 2px;
+  font-size: 12px;
+  padding: 4px 0;
 }
 
-.feed__empty { color: var(--ink-soft); font-size: 13px; margin: 0; }
+.act__verb { letter-spacing: 0.12em; text-transform: uppercase; }
+.act__why { color: var(--ink-mid); }
 
-/* --- degraded banner ------------------------------------------------------- */
+.act--refused .act__verb,
+.act--refused .act__why { color: var(--ink-faint); text-decoration: line-through; }
 
-.degraded {
-  display: none;
-  margin: 0 28px;
-  padding: 9px 14px;
-  border-left: 3px solid var(--stock-gold);
-  background: rgba(217, 164, 65, 0.08);
+.gap {
+  margin-top: 20px;
+  padding: 12px 0 0;
+  border-top: 2.5px solid var(--grease);
+  color: var(--grease);
+}
+
+.gap__label {
+  font-family: var(--display);
   font-size: 13px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
 }
 
-.degraded[data-show="true"] { display: block; }
+.gap__line { font-family: var(--mono); font-size: 12px; }
 
-@media (max-width: 900px) {
-  main { grid-template-columns: minmax(0, 1fr); }
-  .slate__clock { margin-left: 0; }
+/* --- marginalia ------------------------------------------------------------- */
+
+.margin {
+  border-left: 1px solid var(--suite-line);
+  padding-left: 20px;
+  align-self: stretch;
 }
 
-@media (max-width: 420px) {
-  main { padding: 18px 16px 32px; }
-  .degraded { margin: 0 16px; }
+.margin__label {
+  font-family: var(--display);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--dark-soft);
+  margin-bottom: 12px;
+}
 
-  /* The slate stacked four deep and took a quarter of the screen. Pair the
-     identity with the clock, and the review with its revision chip. */
-  .slate {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 6px 12px;
-    align-items: center;
-    padding: 12px 16px;
+.feed { list-style: none; margin: 0; padding: 0; display: grid; gap: 9px; }
+
+.feed__item { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 8px; font-size: 12.5px; }
+.feed__time { font-family: var(--mono); font-size: 10.5px; color: var(--dark-soft); padding-top: 2px; }
+.feed__empty { color: var(--dark-soft); font-size: 13px; margin: 0; }
+
+@media (max-width: 880px) {
+  .desk { grid-template-columns: minmax(0, 1fr); gap: 26px; padding: 20px 14px 40px; }
+  .sheet { padding: 24px 20px 22px; }
+  .cols { display: none; }
+  .row {
+    grid-template-columns: 20px 92px minmax(0, 1fr);
+    grid-template-areas: "n frame shot" ". frame status";
+    row-gap: 2px;
   }
-  .slate__mark { font-size: 21px; }
-  .slate__clock { font-size: 20px; margin-left: 0; text-align: right; }
-  .slate__review { grid-column: 1; font-size: 11px; }
-  .slate__rev { grid-column: 2; justify-self: end; }
+  .row__n { grid-area: n; }
+  .row__frame, .row__frame--empty { grid-area: frame; width: 92px; }
+  .row__shot { grid-area: shot; }
+  .row__status { grid-area: status; }
+  .row__quality, .row__count { display: none; }
+  .row[data-state="at_risk"]::before { left: -20px; }
+  .sheet__title { font-size: 26px; }
+  .slate__clock { font-size: 18px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .card__strike path { animation: none; stroke-dashoffset: 0; }
-  * { transition: none !important; }
+  .sheet--issuing { animation: none; }
+  .row__strike path { animation: none; stroke-dashoffset: 0; }
 }
 </style>
 </head>
 <body>
 
 <header class="slate">
-  <div class="slate__mark">Callsheet</div>
-  <div class="slate__review" id="review">&mdash;</div>
-  <div class="slate__rev" id="rev">Rev 0 &middot; White</div>
-  <div class="slate__clock" id="clock">--:--</div>
+  <span class="slate__mark">Callsheet</span>
+  <span class="slate__review" id="review">&mdash;</span>
+  <span class="slate__clock" id="clock">--:--</span>
 </header>
 
-<p class="degraded" id="degraded"></p>
+<p class="banner" id="banner"></p>
 
-<main>
-  <section>
-    <h2 class="eyebrow">Shot board</h2>
-    <div class="grid" id="cards"></div>
-  </section>
+<div class="desk">
+  <article class="sheet" id="sheet" data-stock="white">
+    <div class="sheet__head">
+      <div>
+        <h1 class="sheet__title">Call sheet</h1>
+        <div class="sheet__meta" id="sheetMeta">Awaiting the first round</div>
+      </div>
+      <div class="stamp" id="stamp">
+        <span class="stamp__n">Rev 0</span>
+        <span class="stamp__stock">White</span>
+      </div>
+    </div>
 
-  <aside class="rail">
-    <article class="paper" id="paper" data-stock="white">
-      <div class="paper__stamp" id="stamp">Revision 0<br>White</div>
-      <h2 class="paper__title">Call sheet</h2>
-      <hr class="paper__rule">
-      <p class="paper__summary" id="summary">Waiting for the first scheduling round.</p>
-      <div id="actions"></div>
-      <div class="paper__gap" id="gap" hidden></div>
-    </article>
+    <div class="cols">
+      <span>&numero;</span><span>Frame</span><span>Shot</span>
+      <span>Qual</span><span>Done</span><span>Status</span>
+    </div>
+    <div id="rows"></div>
 
-    <section class="feed">
-      <h2 class="eyebrow">Event feed</h2>
-      <ul class="feed__list" id="feed"></ul>
-      <p class="feed__empty" id="feedEmpty">Nothing yet tonight.</p>
+    <section class="amend">
+      <div class="amend__label">Amendment</div>
+      <p class="amend__summary" id="summary">No amendment has been issued.</p>
+      <div id="acts"></div>
+      <div class="gap" id="gap" hidden>
+        <div class="gap__label">Gap not closed</div>
+        <div class="gap__line" id="gapLine"></div>
+      </div>
     </section>
+  </article>
+
+  <aside class="margin">
+    <div class="margin__label">Event feed</div>
+    <ul class="feed" id="feed"></ul>
+    <p class="feed__empty" id="feedEmpty">Nothing yet tonight.</p>
   </aside>
-</main>
+</div>
 
 <script>
-const STOCK_NAME = { white: "White", blue: "Blue", pink: "Pink", goldenrod: "Goldenrod" };
-
-// A grease-pencil stroke, drawn slightly off-true so it reads as a hand.
-const STRIKE = '<svg class="card__strike" viewBox="0 0 210 150" preserveAspectRatio="none" aria-hidden="true">' +
-               '<path d="M8 138 C 60 96, 96 74, 202 12"/></svg>';
+const STOCK = { white: "White", blue: "Blue", pink: "Pink", goldenrod: "Goldenrod" };
+const STATUS = {
+  waiting: "Waiting", rendering: "Rendering", in_the_can: "In the can",
+  at_risk: "Will miss", struck: "Struck"
+};
+const STRIKE = '<svg class="row__strike" viewBox="0 0 600 44" preserveAspectRatio="none" aria-hidden="true">' +
+               '<path d="M4 34 C 150 20, 330 26, 596 9"/></svg>';
 
 let deadline = 0;
+let lastRevision = null;
 
-function pad(n) { return String(n).padStart(2, "0"); }
+const pad = n => String(n).padStart(2, "0");
+const clock = s => { const d = new Date(s * 1000); return pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds()); };
 
-function timecode(epochSeconds) {
-  const d = new Date(epochSeconds * 1000);
-  return pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
-}
-
-function tickClock() {
+function tick() {
   const el = document.getElementById("clock");
   if (!deadline) { el.textContent = "--:--"; el.dataset.late = "false"; return; }
   const left = deadline - Math.floor(Date.now() / 1000);
-  const sign = left < 0 ? "+" : "-";
-  const abs = Math.abs(left);
-  el.textContent = "T" + sign + pad(Math.floor(abs / 60)) + ":" + pad(abs % 60);
+  const a = Math.abs(left);
+  el.textContent = "T" + (left < 0 ? "+" : "-") + pad(Math.floor(a / 60)) + ":" + pad(a % 60);
   el.dataset.late = String(left < 0);
 }
 
-// The card never computes a shortfall. That number is arithmetic, it already
-// exists in `residuals`, and deriving it a second time here is how the two
-// surfaces start disagreeing. The card states the situation; the call sheet
-// states the number.
-function etaLabel(card) {
-  if (card.state === "struck") return "Struck from tonight's queue";
-  if (card.state === "in_the_can") return "In the can";
-  if (card.state === "at_risk") return "Will miss the review";
-  if (card.eta_s === null || card.eta_s === undefined) return "Not started";
-  return "Ready in " + card.eta_s + "s";
+// The row states the situation. It never computes a shortfall - that number is
+// arithmetic, it already exists in the residuals, and deriving it twice is how
+// two parts of one document start disagreeing.
+function rowStatus(card) {
+  if (card.state === "waiting" && card.eta_s) return "Ready in " + card.eta_s + "s";
+  return STATUS[card.state] || card.state;
 }
 
-function renderCards(cards) {
-  const host = document.getElementById("cards");
-  host.innerHTML = cards.map(card => {
-    const face = card.thumbnail
-      ? '<img class="card__frame" src="' + card.thumbnail + '" alt="Latest rendered frame of ' + card.shot_id + '">'
-      : '<div class="card__frame card__frame--empty">No frame yet</div>';
-
-    const segments = Array.from({ length: card.frames_total }, (_, i) =>
-      '<span class="card__seg" data-done="' + (i < card.frames_done) + '"></span>').join("");
-
-    return '<article class="card" data-state="' + card.state + '" tabindex="0">' +
-      (card.state === "struck" ? STRIKE : "") + face +
-      '<div class="card__body">' +
-        '<div class="card__id"><span>' + card.shot_id + '</span>' +
-        '<span class="card__quality">' + card.quality + '</span></div>' +
-        '<div class="card__frames">' + segments + '</div>' +
-        '<div class="card__eta">' + etaLabel(card) + '</div>' +
-      '</div></article>';
+function renderRows(cards) {
+  document.getElementById("rows").innerHTML = cards.map((c, i) => {
+    const frame = c.thumbnail
+      ? '<img class="row__frame" src="' + c.thumbnail + '" alt="Latest frame of ' + c.shot_id + '">'
+      : '<div class="row__frame row__frame--empty">no frame</div>';
+    return '<div class="row" data-state="' + c.state + '">' +
+      (c.state === "struck" ? STRIKE : "") +
+      '<span class="row__n">' + pad(i + 1) + '</span>' + frame +
+      '<span class="row__shot">' + c.shot_id + '</span>' +
+      '<span class="row__quality">' + c.quality + '</span>' +
+      '<span class="row__count">' + c.frames_done + "/" + c.frames_total + '</span>' +
+      '<span class="row__status">' + rowStatus(c) + '</span>' +
+      '</div>';
   }).join("");
 }
 
-function renderPaper(state) {
-  const stock = state.stock || "white";
-  document.getElementById("paper").dataset.stock = stock;
-  document.getElementById("stamp").innerHTML =
-    "Revision " + state.revision + "<br>" + (STOCK_NAME[stock] || stock);
-  document.getElementById("rev").textContent =
-    "Rev " + state.revision + " · " + (STOCK_NAME[stock] || stock);
-  document.getElementById("summary").textContent =
-    state.summary || "Waiting for the first scheduling round.";
+function renderAmendment(s) {
+  document.getElementById("summary").textContent = s.summary || "No amendment has been issued.";
 
-  const taken = (state.actions || []).map(a =>
-    '<div class="paper__action"><span class="paper__verb">' + a.action + '</span>' +
-    '<span class="paper__reason">' + a.shot_id + " &mdash; " + a.reason + '</span></div>').join("");
+  const taken = (s.actions || []).map(a =>
+    '<div class="act"><span class="act__verb">' + a.action + '</span>' +
+    '<span class="act__why">' + a.shot_id + " &mdash; " + a.reason + '</span></div>').join("");
+  const refused = (s.rejections || []).map(r =>
+    '<div class="act act--refused"><span class="act__verb">' + r.action.action + '</span>' +
+    '<span class="act__why">' + r.action.shot_id + " &mdash; " + r.reason + '</span></div>').join("");
+  document.getElementById("acts").innerHTML = taken + refused;
 
-  const refused = (state.rejections || []).map(r =>
-    '<div class="paper__action paper__action--rejected">' +
-    '<span class="paper__verb">' + r.action.action + '</span>' +
-    '<span class="paper__reason">' + r.action.shot_id + " &mdash; " + r.reason + '</span></div>').join("");
-
-  document.getElementById("actions").innerHTML = taken + refused;
-
-  const open = (state.residuals || []).filter(r => !r.closed);
-  const gap = document.getElementById("gap");
-  gap.hidden = open.length === 0;
-  if (open.length) {
-    gap.innerHTML = "<strong>Gap not closed</strong>" + open.map(r =>
-      r.shot_id + " still short by " + r.shortfall_s + "s").join("<br>");
-  }
+  const open = (s.residuals || []).filter(r => !r.closed);
+  document.getElementById("gap").hidden = open.length === 0;
+  document.getElementById("gapLine").innerHTML =
+    open.map(r => r.shot_id + " still short by " + r.shortfall_s + "s").join("<br>");
 }
 
 function renderFeed(events) {
-  const list = document.getElementById("feed");
-  const empty = document.getElementById("feedEmpty");
-  empty.hidden = events.length > 0;
-  list.innerHTML = events.slice().reverse().slice(0, 40).map(e =>
-    '<li class="feed__item"><span class="feed__time">' + timecode(e.at_epoch_s) + '</span>' +
+  document.getElementById("feedEmpty").hidden = events.length > 0;
+  document.getElementById("feed").innerHTML = events.slice().reverse().slice(0, 30).map(e =>
+    '<li class="feed__item"><span class="feed__time">' + clock(e.at_epoch_s) + '</span>' +
     '<span>' + e.text + '</span></li>').join("");
 }
 
-function apply(state) {
-  deadline = state.deadline_epoch_s || 0;
+function apply(s) {
+  deadline = s.deadline_epoch_s || 0;
+  const stock = s.stock || "white";
+  const sheet = document.getElementById("sheet");
+
   document.getElementById("review").textContent =
-    state.review_name + (deadline ? " · " + timecode(deadline) : "");
+    s.review_name + (deadline ? " · " + clock(deadline) : "");
 
-  // Verbatim. The reason arrives already written as a sentence, because the
-  // engine knows which degrade this is and the page does not: it used to staple
-  // "the model is unavailable" onto every one of them, which said the model was
-  // out when Grafana had refused a write, and would now say it twice when the
-  // day's quota is spent.
-  const banner = document.getElementById("degraded");
-  banner.dataset.show = String(Boolean(state.degraded_reason));
-  if (state.degraded_reason) {
-    banner.textContent = state.degraded_reason;
+  // A reissue is the one thing on this page worth watching, so it is played
+  // rather than swapped. Only on a genuine revision change - a sheet that
+  // animates every tick is a screensaver.
+  if (lastRevision !== null && s.revision !== lastRevision) {
+    sheet.classList.remove("sheet--issuing");
+    void sheet.offsetWidth;
+    sheet.classList.add("sheet--issuing");
   }
+  lastRevision = s.revision;
 
-  renderCards(state.cards || []);
-  renderPaper(state);
-  renderFeed(state.events || []);
-  tickClock();
+  sheet.dataset.stock = stock;
+  document.getElementById("stamp").innerHTML =
+    '<span class="stamp__n">Rev ' + s.revision + '</span>' +
+    '<span class="stamp__stock">' + (STOCK[stock] || stock) + '</span>';
+  document.getElementById("sheetMeta").textContent =
+    s.review_name + (deadline ? " · called for " + clock(deadline) : "");
+
+  const banner = document.getElementById("banner");
+  banner.dataset.show = String(Boolean(s.degraded_reason));
+  banner.textContent = s.degraded_reason || "";
+
+  renderRows(s.cards || []);
+  renderAmendment(s);
+  renderFeed(s.events || []);
+  tick();
 }
 
 fetch("/api/state").then(r => r.json()).then(apply).catch(() => {});
 
-// `addEventListener("state")`, not `onmessage`: the stream names its events, and
-// a named event never reaches `onmessage`. With that handler the page fetched
-// once and then sat there looking live while every update went to the floor.
 const stream = new EventSource("/api/stream");
-stream.addEventListener("state", event => {
-  try { apply(JSON.parse(event.data)); } catch (e) { /* keep the last good board */ }
+stream.addEventListener("state", e => {
+  try { apply(JSON.parse(e.data)); } catch (err) { /* keep the last good sheet */ }
 });
 
-setInterval(tickClock, 1000);
+setInterval(tick, 1000);
 </script>
 </body>
 </html>
