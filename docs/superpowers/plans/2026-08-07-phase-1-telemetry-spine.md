@@ -1,6 +1,5 @@
 # CALLSHEET Phase 1 — Telemetry Spine Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Prove that a real Blender render's telemetry reaches Grafana Cloud's free tier and can be read back out through the Grafana MCP server, entirely at $0.
 

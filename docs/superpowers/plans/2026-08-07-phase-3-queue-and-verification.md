@@ -1,6 +1,5 @@
 # CALLSHEET Phase 3 — Job Queue and Decision Verification Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make the agent's decisions real and honest — apply them to an actual job queue, then re-forecast to prove whether they close the deadline gap, and escalate when nothing can.
 

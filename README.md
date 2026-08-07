@@ -7,7 +7,8 @@ Built for the Google Cloud Agentic Cinema Hackathon, Grafana partner track.
 
 ## Status
 
-Phase 3 — the loop checks its own work. Real Blender renders report to Grafana
+Phase 4 — the loop checks its own work, and there is a board to watch it on.
+Real Blender renders report to Grafana
 Cloud over OpenTelemetry; the agent reads their observed frame times back through
 the Grafana MCP server, forecasts which shots miss the review deadline, asks
 Gemini what to sacrifice, re-forecasts the queue as it would be after that plan
@@ -62,9 +63,16 @@ on `PATH`; otherwise the bare command `mcp-grafana` is used.
 ## Run
 
 ```
-python scripts/spike_end_to_end.py    # Phase 1: render and prove the telemetry lands
+python -m uvicorn callsheet.server:app --port 8420   # the shot board, at localhost:8420
+python scripts/spike_end_to_end.py    # render, and prove the telemetry lands
 python scripts/demo_round.py          # one full scheduling round, verified
+python scripts/fresh_night.py         # clear the frames and the queue, to start a night over
 ```
+
+The board is the product surface: the call sheet itself, with each shot as a
+numbered row carrying its last rendered frame. When the agent issues an
+amendment the sheet is reissued on the next colour of paper — white, blue, pink,
+goldenrod — which is what a film production does when the day is revised.
 
 `spike_end_to_end.py` exits 0 when real render telemetry is reaching Grafana
 Cloud and is readable back through the MCP server.

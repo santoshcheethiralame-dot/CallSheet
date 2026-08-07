@@ -1,6 +1,5 @@
 # CALLSHEET Phase 2 — Forecaster and Agent Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Turn the proven telemetry spine into a scheduling loop — read real farm state from Grafana, forecast which shots miss the review deadline, let Gemini decide what to sacrifice, and write the decision back as a Grafana annotation.
 

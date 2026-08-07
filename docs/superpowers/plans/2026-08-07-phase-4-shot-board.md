@@ -1,6 +1,5 @@
 # CALLSHEET Phase 4 — Shot Board Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Give the system a face — a production surface a judge understands in ten seconds without narration, carrying the same honesty the engine now has.
 
