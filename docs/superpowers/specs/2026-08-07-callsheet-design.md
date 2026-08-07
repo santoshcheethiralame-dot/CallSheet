@@ -424,6 +424,41 @@ two-tier spike renders both passes in one session under CPU contention, and the
 rate window mixes both. This is the across-run variance §12 already flagged, and
 it is the reason the §6 ablation must repeat whole runs rather than trust one.
 
+**Phase 3 closes the credibility gap.** The demo now ends:
+
+```
+After applying the plan:
+  CLOSED  SH001 makes the review
+  STILL SHORT  SH003 by 65s
+
+PASS: loop completed and reported honestly - gap NOT closed (SH003 by 65s).
+```
+
+and the Grafana annotation carries `GAP NOT CLOSED: SH003 still short by 65s`.
+Exit 0 now means *the system told the truth about the outcome*, not that the
+outcome was good. An unclosed residual correctly reported is a pass; an unclosed
+residual reported as success is the bug this phase removed.
+
+Three smaller things that turned out to matter:
+
+- **`all([])` is `True`**, so an empty residual list would have printed the
+  triumphant line on a run where nothing was verified at all. The empty case now
+  says "no required shot was at risk, so no gap was checked" — neither success
+  nor failure wording, because neither is what happened.
+- **Queue-position reasoning is now structural, not just prompted.** `guard.py`
+  rejects actions that cannot recover time before they are applied, and the
+  rejected ones are kept out of both the call sheet and the annotation. A prompt
+  is a request; this is a constraint.
+- **Gemini returned `503 UNAVAILABLE` four times in one session.** The degrade
+  path handled every one correctly, but a 503 during the recorded demo means the
+  product never appears on screen. `decide()` now retries transient failures
+  (503/429/UNAVAILABLE) up to 3 times with backoff, and never retries a
+  malformed response or an auth error.
+
+Same class of live-demo risk, also closed: every printed line is now ASCII, so a
+console on a legacy codepage cannot kill the demo mid-sentence with a
+`UnicodeEncodeError`.
+
 ---
 
 _Living doc. Update the same day a decision changes._

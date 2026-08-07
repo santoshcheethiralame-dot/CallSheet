@@ -16,7 +16,7 @@
 - **The LLM does judgement; code does arithmetic.** The residual check is arithmetic and must never be delegated to the model.
 - **Python 3.11+. Windows 11 / PowerShell.**
 - **Tests must pass with no credentials and no network**, except `@pytest.mark.integration`.
-- Current baseline: **57 passed, 6 deselected.** Keep it green.
+- Baseline at plan time: 57 passed, 6 deselected. **Phase 3 complete: 113 passed, 7 deselected.**
 
 ## Why this phase exists
 

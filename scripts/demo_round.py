@@ -59,7 +59,7 @@ def main() -> int:
         return 4
 
     if result.decision is None:
-        print("FAIL: no miss forecast — the deadline was not tight enough to exercise the agent")
+        print("FAIL: no miss forecast - the deadline was not tight enough to exercise the agent")
         return 3
 
     # Only what the guard let through. Printing every proposed action here put a
@@ -67,13 +67,13 @@ def main() -> int:
     # both the REJECTED lines below it and the annotation Grafana receives.
     print(f"\nCALL SHEET: {result.decision.summary}")
     for action in surviving(result.decision.actions, result.guard_rejections):
-        print(f"  {action.action.upper():10} {action.shot_id} — {action.reason}")
+        print(f"  {action.action.upper():10} {action.shot_id} - {action.reason}")
 
     # A guard that fires silently teaches a viewer nothing. Rejected actions are
     # printed because "the model proposed this and the code refused it" is the
     # part of the design that is otherwise invisible.
     for action, why in result.guard_rejections:
-        print(f"  REJECTED   {action.shot_id} — {why}")
+        print(f"  REJECTED   {action.shot_id} - {why}")
 
     print("\nAfter applying the plan:")
     for residual in result.residuals:
