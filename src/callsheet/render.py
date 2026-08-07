@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import time
 from dataclasses import dataclass
@@ -41,9 +42,13 @@ def render_frame(
             "--python-expr",
             f"import bpy; bpy.context.scene.cycles.samples = {samples_override}",
         ]
+    # Absolute, always. Blender resolves a bare relative output path against the
+    # drive root on Windows, not the working directory: "out/" silently became
+    # "C:\out\". Every render still reported success, because success was only
+    # ever measured by exit code.
     command += [
         "-o",
-        f"{out_dir}/{shot}_",
+        os.path.join(os.path.abspath(out_dir), f"{shot}_"),
         "-F",
         "PNG",
         "-f",
