@@ -812,47 +812,113 @@ def test_annotation_states_when_the_gap_was_not_closed():
 
 - [ ] **Step 2: Implement**
 
-Phase 2's `run_round` discards the miss list — it does `if not misses(forecasts):
-return ...` without binding the result. Bind it first, or `missing` below is a
-`NameError`:
+**`RoundResult` gains two fields, and they need `default_factory`.** A bare
+`residuals: list[Residual] = []` is a `ValueError` at class-definition time —
+dataclasses reject mutable defaults. They must also follow the already-defaulted
+`degraded_reason`.
 
 ```python
 # src/callsheet/round.py
-    missing = misses(forecasts)
-    if not missing:
-        return RoundResult(forecasts, None, False, residuals=[], guard_rejections=[])
+from dataclasses import dataclass, field
+
+
+@dataclass(frozen=True)
+class RoundResult:
+    forecasts: list[Forecast]
+    decision: Decision | None
+    annotation_written: bool
+    degraded_reason: str | None = None
+    residuals: list[Residual] = field(default_factory=list)
+    guard_rejections: list[tuple[Action, str]] = field(default_factory=list)
 ```
 
-Then, after `decide` succeeds:
+**All four `return` statements must be updated, not just the first.** Phase 2's
+`run_round` returns in four places: healthy farm, model failure, annotation
+failure, and success. The success return is the one the new tests read, so
+missing it makes `result.residuals` empty on the exact path that matters.
+
+Phase 2's version also discards the miss list — `if not misses(forecasts):` never
+binds the result, so `missing` below would be a `NameError`. Bind it:
 
 ```python
+    missing = misses(forecasts)
+    if not missing:
+        return RoundResult(forecasts, None, False)
+
+    try:
+        decision = decide(config, shots, review, forecasts)
+    except Exception as error:      # noqa: BLE001
+        return RoundResult(forecasts, None, False, degraded_reason=str(error))
+
+    # Anchor the guard on the EARLIEST missing required shot. `misses` returns
+    # queue order, so this is deliberately conservative: an action that would
+    # rescue a later missing shot is rejected as "behind". A policy choice,
+    # written down rather than arrived at by accident.
     at_risk = missing[0].shot_id
+
     guard_rejections = rejected(decision.actions, forecasts, at_risk)
     blocked = {id(action) for action, _ in guard_rejections}
-    allowed = [a for a in decision.actions if id(a) not in blocked]
+    allowed = [action for action in decision.actions if id(action) not in blocked]
     residuals = verify(shots, allowed, review, state, now_epoch_s)
+
+    try:
+        await write_annotation(config, decision, now_epoch_s,
+                               residuals=residuals, applied=allowed,
+                               rejections=guard_rejections)
+    except Exception as error:      # noqa: BLE001
+        return RoundResult(forecasts, decision, False, f"annotation failed: {error}",
+                           residuals, guard_rejections)
+
+    return RoundResult(forecasts, decision, True, None, residuals, guard_rejections)
 ```
 
-Identity rather than equality: `Action` is a frozen dataclass, so two distinct
-actions with the same field values compare equal, and an `a not in {...}` test
-would drop a legitimate action that happened to match a rejected one.
+Identity rather than equality when filtering: `Action` is a frozen dataclass, so
+two distinct actions with identical fields compare equal, and `action not in
+{...}` would drop a legitimate action that merely matched a rejected one.
 
-`build_annotation` gains a `residuals` parameter:
+**Both** `build_annotation` and `write_annotation` take the new arguments. Giving
+them only to `build_annotation` would leave a green unit test sitting over
+production wiring that never runs — the worst possible outcome in the one phase
+about not claiming success falsely.
+
+The annotation renders **`applied`, not `decision.actions`**. A guard-rejected
+action that still appears in Grafana is the same dishonesty as an unreported
+residual, one level down.
 
 ```python
 # src/callsheet/annotate.py
-def build_annotation(decision: Decision, now_epoch_s: int,
-                     residuals: list["Residual"] | None = None) -> dict:
+from callsheet.verify import Residual
+
+
+def build_annotation(
+    decision: Decision,
+    now_epoch_s: int,
+    residuals: list[Residual] | None = None,
+    applied: list[Action] | None = None,
+    rejections: list[tuple[Action, str]] | None = None,
+) -> dict:
+    """Render the decision as Grafana sees it.
+
+    `applied` defaults to every action in the decision, but when the guard has
+    blocked some, only the surviving ones are reported as taken.
+    """
+    actions = decision.actions if applied is None else applied
     detail = "; ".join(
-        f"{action.action} {action.shot_id} ({action.reason})" for action in decision.actions
+        f"{action.action} {action.shot_id} ({action.reason})" for action in actions
     )
+
     text = f"CALLSHEET: {decision.summary}"
     if detail:
         text += f" — {detail}"
 
-    unclosed = [r for r in (residuals or []) if not r.closed]
+    for action, why in rejections or []:
+        text += f" — REJECTED {action.action} {action.shot_id}: {why}"
+
+    unclosed = [residual for residual in (residuals or []) if not residual.closed]
     if unclosed:
-        shortfalls = ", ".join(f"{r.shot_id} still short by {r.shortfall_s}s" for r in unclosed)
+        shortfalls = ", ".join(
+            f"{residual.shot_id} still short by {residual.shortfall_s}s" for residual in unclosed
+        )
         text += f" — GAP NOT CLOSED: {shortfalls}"
 
     return {
@@ -860,7 +926,52 @@ def build_annotation(decision: Decision, now_epoch_s: int,
         "time": now_epoch_s * 1000,
         "tags": ["callsheet", "scheduling-decision"],
     }
+
+
+async def write_annotation(
+    config: Config,
+    decision: Decision,
+    now_epoch_s: int,
+    residuals: list[Residual] | None = None,
+    applied: list[Action] | None = None,
+    rejections: list[tuple[Action, str]] | None = None,
+) -> str:
+    return await call_tool(
+        config,
+        "create_annotation",
+        build_annotation(decision, now_epoch_s, residuals, applied, rejections),
+    )
 ```
+
+Add a test that the *production* path carries the gap, not just the builder:
+
+```python
+# tests/test_annotate.py
+@pytest.mark.asyncio
+async def test_write_annotation_passes_the_residual_through_to_the_payload():
+    """Guards against the builder knowing about gaps while the writer does not."""
+    from unittest.mock import AsyncMock, patch
+
+    from callsheet.verify import Residual
+
+    with patch("callsheet.annotate.call_tool", AsyncMock(return_value="ok")) as call:
+        await write_annotation(CONFIG, DECISION, 1_000_000, residuals=[Residual("SH003", 66, False)])
+
+    assert "66" in call.call_args[0][2]["text"]
+
+
+def test_a_rejected_action_is_not_reported_as_taken():
+    payload = build_annotation(
+        DECISION, 1_000_000,
+        applied=[],
+        rejections=[(DECISION.actions[0], "behind the at-risk shot")],
+    )
+    assert "REJECTED" in payload["text"]
+    assert "preempt SH002 (already cut)" not in payload["text"]
+```
+
+`CONFIG` in that module is the same keyword-constructed `Config` used in
+`tests/test_round.py`.
 
 - [ ] **Step 3: Run the whole suite, verify, commit**
 
@@ -898,6 +1009,26 @@ fires silently teaches a viewer nothing.
             print(f"  STILL SHORT  {residual.shot_id} by {residual.shortfall_s}s")
 ```
 
+**The closing line must change too.** Phase 2 ends with
+`PASS: observe -> forecast -> decide -> annotate completed end to end`, which
+reads as "it worked" and would re-commit the exact sin this phase fixes — in
+front of a judge. Replace it:
+
+```python
+    closed = all(residual.closed for residual in result.residuals)
+    if closed:
+        print("\nPASS: the plan closes the deadline gap.")
+    else:
+        short = ", ".join(
+            f"{r.shot_id} by {r.shortfall_s}s" for r in result.residuals if not r.closed
+        )
+        print(f"\nPASS: loop completed and reported honestly — gap NOT closed ({short}).")
+    return 0
+```
+
+Both are exit 0. The system's job here is to tell the truth about the outcome,
+not to guarantee a good one.
+
 - [ ] **Step 2: Run it and record the output**
 
 Run: `python scripts/demo_round.py`
@@ -907,6 +1038,11 @@ report the truth about it. An unclosed residual that is correctly reported is a
 pass; an unclosed residual reported as success is the bug this phase fixes.
 
 - [ ] **Step 3: Update the README, commit**
+
+The README gains a **How it works** section stating the loop in four steps
+(observe → forecast → decide → verify), and one sentence that the system reports
+an unclosed gap rather than claiming success. Keep the existing setup and run
+instructions; add `python scripts/demo_round.py` alongside the spike command.
 
 ```bash
 git add scripts/demo_round.py README.md
