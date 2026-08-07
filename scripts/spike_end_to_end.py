@@ -30,6 +30,23 @@ REQUIRED_TOOLS = ("list_datasources", "query_prometheus")
 # healthy the stack was.
 PROBE_QUERY = 'count by (__name__) ({__name__=~"render_frame_duration.*"})'
 
+# One series per (shot, quality). Three shots at two tiers is six; three means
+# only one tier reached Grafana and the proxy rate is still unmeasured.
+TIER_QUERY = 'count by (shot, quality) (render_frame_duration_milliseconds_count)'
+
+
+async def query(config: Config, expr: str) -> str:
+    return await call_tool(
+        config,
+        "query_prometheus",
+        {
+            "datasourceUid": PROM_DATASOURCE_UID,
+            "expr": expr,
+            "queryType": "instant",
+            "endTime": "now",
+        },
+    )
+
 
 async def read_back(config: Config) -> str:
     tools = await list_tools(config)
@@ -48,16 +65,10 @@ async def read_back(config: Config) -> str:
     # datasourceUid and endTime are both REQUIRED. Omitting them does not raise —
     # the server returns its error as ordinary text content, which sails past any
     # try/except and gets misreported as a credentials failure.
-    return await call_tool(
-        config,
-        "query_prometheus",
-        {
-            "datasourceUid": PROM_DATASOURCE_UID,
-            "expr": PROBE_QUERY,
-            "queryType": "instant",
-            "endTime": "now",
-        },
-    )
+    tiers = await query(config, TIER_QUERY)
+    print(f"  (shot, quality) series: {tiers[:400]}")
+
+    return await query(config, PROBE_QUERY)
 
 
 def main() -> int:
@@ -68,16 +79,40 @@ def main() -> int:
         print(f"FAIL: {error}")
         return 2
 
-    print("1/3 rendering the manifest...")
+    print("1/3 rendering the manifest at both quality tiers...")
+    # Both tiers, because a `downgrade` decision is only defensible if the farm
+    # has actually measured what proxy quality costs. One pass would leave the
+    # forecaster guessing the speedup, which is the number a judge should press on.
+    #
     # The `with` form is load-bearing: shutdown() is the only thing that flushes
     # the final export, and a run that skips it loses every metric silently.
+    results: dict[str, list] = {}
     with Telemetry.for_grafana(config) as telemetry:
-        results = run_manifest(config, telemetry, "scenes/manifest.json")
+        for quality in ("final", "proxy"):
+            print(f"  {quality}...")
+            results[quality] = run_manifest(
+                config, telemetry, "scenes/manifest.json", quality=quality
+            )
 
-    succeeded = sum(1 for result in results if result.succeeded)
-    print(f"  rendered {len(results)} frames, {succeeded} succeeded")
-    for result in results:
-        print(f"    {result.shot} frame {result.frame}: {result.duration_ms:.0f} ms")
+    every = [result for batch in results.values() for result in batch]
+    succeeded = sum(1 for result in every if result.succeeded)
+    print(f"  rendered {len(every)} frames, {succeeded} succeeded")
+    for quality, batch in results.items():
+        for result in batch:
+            print(f"    {quality:5} {result.shot} frame {result.frame}: {result.duration_ms:.0f} ms")
+
+    # The measured speedup, per shot. Not a constant — it depends on how much of
+    # a shot's cost is sampling rather than Blender's fixed startup.
+    print("  measured proxy speedup:")
+    for shot in sorted({result.shot for result in every}):
+        means = {
+            quality: sum(r.duration_ms for r in batch if r.shot == shot)
+            / max(1, sum(1 for r in batch if r.shot == shot))
+            for quality, batch in results.items()
+        }
+        if means.get("proxy"):
+            print(f"    {shot}: final {means['final']:.0f} ms / proxy {means['proxy']:.0f} ms"
+                  f" = {means['final'] / means['proxy']:.2f}x")
     if succeeded == 0:
         print("FAIL: no frame rendered. Check BLENDER_PATH and scenes/manifest.json")
         return 3

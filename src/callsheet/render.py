@@ -24,17 +24,24 @@ def render_frame(
     frame: int,
     out_dir: str,
     timeout_s: int = 600,
+    samples_override: int | None = None,
 ) -> RenderResult:
     """Render one frame in Blender's background mode.
 
-    Sample count is baked into the .blend by scenes/make_scenes.py, so it is not
-    a parameter here. Phase 2 introduces proxy/final quality tiers by overriding
-    bpy.context.scene.cycles.samples through Blender's --python-expr flag.
+    Sample count is normally baked into the .blend by scenes/make_scenes.py.
+    `samples_override` lowers it for proxy-quality renders; Blender has no CLI
+    flag for this, so it goes through --python-expr. Argument order is
+    load-bearing: the expression must follow the .blend, or it runs before there
+    is a scene to change, and it must precede -f, or the render is already
+    queued at the baked sample count by the time it runs.
     """
-    command = [
-        blender_path,
-        "-b",
-        scene,
+    command = [blender_path, "-b", scene]
+    if samples_override is not None:
+        command += [
+            "--python-expr",
+            f"import bpy; bpy.context.scene.cycles.samples = {samples_override}",
+        ]
+    command += [
         "-o",
         f"{out_dir}/{shot}_",
         "-F",

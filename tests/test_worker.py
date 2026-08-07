@@ -40,6 +40,29 @@ def test_runs_every_frame_of_every_shot(tmp_path):
     assert len(results) == 3
 
 
+def test_final_quality_renders_at_the_baked_sample_count(tmp_path):
+    fake = RenderResult("SH001", 1, 100.0, True, 0, "")
+    telemetry = Telemetry.for_testing(InMemoryMetricReader())
+
+    with patch("callsheet.worker.render_frame", return_value=fake) as render:
+        run_manifest(CONFIG, telemetry, _write_manifest(tmp_path), quality="final")
+
+    assert all(call.kwargs["samples_override"] is None for call in render.call_args_list)
+
+
+def test_proxy_quality_actually_renders_at_a_quarter_of_the_samples(tmp_path):
+    """The label must describe the render. A 'proxy' point measured at final
+    samples would teach the forecaster a speedup that does not exist."""
+    fake = RenderResult("SH001", 1, 100.0, True, 0, "")
+    telemetry = Telemetry.for_testing(InMemoryMetricReader())
+
+    with patch("callsheet.worker.render_frame", return_value=fake) as render:
+        run_manifest(CONFIG, telemetry, _write_manifest(tmp_path), quality="proxy")
+
+    overrides = [call.kwargs["samples_override"] for call in render.call_args_list]
+    assert overrides == [4, 4, 16], "manifest samples are 16, 16, 64"
+
+
 def test_records_one_metric_point_per_frame(tmp_path):
     reader = InMemoryMetricReader()
     telemetry = Telemetry.for_testing(reader)
