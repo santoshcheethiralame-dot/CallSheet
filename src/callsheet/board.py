@@ -87,6 +87,12 @@ class BoardState:
     rejections: list[Rejection]
     residuals: list[Residual]
     events: list[BoardEvent] = field(default_factory=list)
+    degraded_reason: str | None = None
+    """Why this round has no plan behind it, verbatim from `RoundResult`.
+
+    Carried onto the board rather than swallowed because the cards keep showing
+    real forecasts while the model is out: without this the page would present a
+    degraded round as a healthy one that simply decided to do nothing."""
 
 
 def revision_stock(revision: int) -> str:
@@ -156,6 +162,7 @@ def build_board(
     revision: int = 0,
     frames_done: Mapping[str, int] | None = None,
     events: Sequence[BoardEvent] = (),
+    degraded_reason: str | None = None,
     now_epoch_s: int,
 ) -> BoardState:
     """Arrange one round's output as a board.
@@ -199,4 +206,5 @@ def build_board(
         rejections=[Rejection(action, why) for action, why in rejections],
         residuals=list(residuals),
         events=list(events),
+        degraded_reason=degraded_reason,
     )
