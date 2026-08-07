@@ -27,10 +27,18 @@ COPY scenes/manifest.json ./scenes/manifest.json
 COPY review.json ./review.json
 COPY demo/frames ./demo/frames
 
-ENV MCP_GRAFANA_PATH=/usr/local/bin/mcp-grafana \
+# CALLSHEET_ROOT is the important one. Installed, the package sits in
+# site-packages and cannot find the repo by walking up from __file__, so the
+# page, manifest and frames all resolve into the Python install tree and the
+# server serves its placeholder while looking healthy. That is what the first
+# deploy did.
+ENV CALLSHEET_ROOT=/app \
+    CALLSHEET_DB=/tmp/callsheet.db \
+    MCP_GRAFANA_PATH=/usr/local/bin/mcp-grafana \
     PYTHONUNBUFFERED=1 \
     PORT=8080
 EXPOSE 8080
 
-# $PORT is set by Cloud Run and most container hosts; 8080 is the fallback.
+# $PORT is injected by Render, Cloud Run and most container hosts; 8080 is only
+# the fallback for a plain `docker run`.
 CMD ["sh", "-c", "python -m uvicorn callsheet.server:app --host 0.0.0.0 --port ${PORT:-8080}"]

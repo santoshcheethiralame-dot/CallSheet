@@ -209,3 +209,27 @@ def test_the_traversal_guard_still_holds_against_the_fallback_directory(tmp_path
     monkeypatch.setattr(server, "BAKED_DIR", baked)
 
     assert TestClient(server.app).get("/frames/..%5Csecret.txt").status_code == 404
+
+
+def test_root_can_be_pinned_by_environment(monkeypatch, tmp_path):
+    """Installed, the package no longer sits two levels under the repo root.
+
+    In the source tree `src/callsheet/server.py` resolves parents[2] to the repo.
+    Once pip-installs it into site-packages that same expression lands in the
+    Python install tree, so the page, the manifest and the frames all point at
+    nothing and the server quietly serves its placeholder. A container is the
+    normal case for that, not an exotic one.
+    """
+    import importlib
+
+    monkeypatch.setenv("CALLSHEET_ROOT", str(tmp_path))
+    from callsheet import server as server_module
+
+    reloaded = importlib.reload(server_module)
+    try:
+        assert reloaded.ROOT == tmp_path
+        assert reloaded.PAGE == tmp_path / "web" / "index.html"
+        assert reloaded.BAKED_DIR == tmp_path / "demo" / "frames"
+    finally:
+        monkeypatch.delenv("CALLSHEET_ROOT", raising=False)
+        importlib.reload(server_module)

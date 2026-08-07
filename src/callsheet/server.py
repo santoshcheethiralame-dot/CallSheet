@@ -31,7 +31,16 @@ from callsheet.session import Session, open_night
 
 log = logging.getLogger(__name__)
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(os.environ.get("CALLSHEET_ROOT", Path(__file__).resolve().parents[2]))
+"""Where the page, the manifest, the review and the frames live.
+
+`parents[2]` is right for the source tree — `src/callsheet/server.py` is two
+levels under the repo. It is wrong the moment the package is installed: from
+`site-packages/callsheet/server.py` the same expression lands in the Python
+install tree, every asset path points at nothing, and the server serves its
+placeholder while looking perfectly healthy. A container is the ordinary case
+for that, which is why this is an override and not an assumption."""
+
 OUT_DIR = ROOT / "out"
 BAKED_DIR = ROOT / "demo" / "frames"
 """Real frames from a real render, committed so a clone or a container has
