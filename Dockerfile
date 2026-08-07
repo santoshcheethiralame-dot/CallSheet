@@ -20,7 +20,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
 WORKDIR /app
 COPY pyproject.toml README.md LICENSE ./
 COPY src ./src
-RUN pip install --no-cache-dir .
+# Editable, so the package stays at /app/src and the counted root lands on
+# /app rather than in site-packages. Cheap insurance on top of
+# CALLSHEET_ROOT and the cwd probe in _find_root.
+RUN pip install --no-cache-dir -e .
 
 COPY web ./web
 COPY scenes/manifest.json ./scenes/manifest.json

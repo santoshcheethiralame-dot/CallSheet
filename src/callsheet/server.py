@@ -31,15 +31,34 @@ from callsheet.session import Session, open_night
 
 log = logging.getLogger(__name__)
 
-ROOT = Path(os.environ.get("CALLSHEET_ROOT", Path(__file__).resolve().parents[2]))
-"""Where the page, the manifest, the review and the frames live.
+def _find_root(counted: Path | None = None) -> Path:
+    """Where the page, the manifest, the review and the frames live.
 
-`parents[2]` is right for the source tree — `src/callsheet/server.py` is two
-levels under the repo. It is wrong the moment the package is installed: from
-`site-packages/callsheet/server.py` the same expression lands in the Python
-install tree, every asset path points at nothing, and the server serves its
-placeholder while looking perfectly healthy. A container is the ordinary case
-for that, which is why this is an override and not an assumption."""
+    Counting directories up from `__file__` is a guess about how the package was
+    installed, and it is wrong as soon as it is installed at all: from
+    `site-packages/callsheet/server.py`, `parents[2]` lands in the Python install
+    tree. Every asset path then points at nothing, nothing raises, and the server
+    serves its placeholder with a 200 while reporting itself healthy. That is
+    what the first Render deploy did, and the reason it took a while to see is
+    that a confident lie looks exactly like success from outside.
+
+    So look for a file only the root has, rather than counting. `CALLSHEET_ROOT`
+    wins when set; the container's working directory is the next candidate,
+    because a container that copies the tree in also chdirs into it.
+    """
+    override = os.environ.get("CALLSHEET_ROOT")
+    if override:
+        return Path(override)
+
+    if counted is None:
+        counted = Path(__file__).resolve().parents[2]
+    for candidate in (counted, Path.cwd()):
+        if (candidate / "web" / "index.html").is_file():
+            return candidate
+    return counted
+
+
+ROOT = _find_root()
 
 OUT_DIR = ROOT / "out"
 BAKED_DIR = ROOT / "demo" / "frames"

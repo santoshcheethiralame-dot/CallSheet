@@ -233,3 +233,41 @@ def test_root_can_be_pinned_by_environment(monkeypatch, tmp_path):
     finally:
         monkeypatch.delenv("CALLSHEET_ROOT", raising=False)
         importlib.reload(server_module)
+
+
+def test_root_is_found_by_looking_for_the_page_not_by_counting_directories(monkeypatch, tmp_path):
+    """Counting parents is a guess about how the package was installed.
+
+    Looking for a file that only the repo root has is not. `counted` here stands
+    in for a package that pip relocated into site-packages: it exists, and it has
+    no web/ in it. The container chdirs into the tree it copied, so cwd is the
+    candidate that rescues it.
+    """
+    from callsheet.server import _find_root
+
+    relocated = tmp_path / "site-packages" / "python3.12"
+    relocated.mkdir(parents=True)
+
+    app_root = tmp_path / "app"
+    (app_root / "web").mkdir(parents=True)
+    (app_root / "web" / "index.html").write_text("<h1>real</h1>", encoding="utf-8")
+
+    monkeypatch.delenv("CALLSHEET_ROOT", raising=False)
+    monkeypatch.chdir(app_root)
+
+    assert _find_root(counted=relocated) == app_root
+
+
+def test_root_falls_back_to_the_counted_path_when_nothing_holds_the_page(monkeypatch, tmp_path):
+    """No marker anywhere is not a reason to invent one."""
+    from callsheet.server import _find_root
+
+    counted = tmp_path / "counted"
+    counted.mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+
+    monkeypatch.delenv("CALLSHEET_ROOT", raising=False)
+    monkeypatch.chdir(elsewhere)
+
+    assert _find_root(counted=counted) == counted
