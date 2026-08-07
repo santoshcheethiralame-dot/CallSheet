@@ -99,8 +99,12 @@ async def run_rounds(config: Config, session: Session, shots: list[Shot],
         # they cannot disagree about a number they were both handed.
         done = session.progress()
         try:
+            # `session.reuse` is what keeps this timer inside the free tier: 20
+            # model calls a day, a round every 30s, and a fresh night that
+            # misses on every one of them. The session is asked first whether
+            # this situation has already been judged.
             result = await run_round(config, shots, tonight, now_epoch_s=now,
-                                     frames_done=done)
+                                     frames_done=done, reuse=session.reuse)
         except Exception as error:      # noqa: BLE001 — the loop degrades, never dies
             log.warning("round failed: %s", error)
             result = RoundResult([], None, False, degraded_reason=str(error))

@@ -27,6 +27,36 @@ outlive a capacity blip, short enough that nobody watching the demo notices."""
 
 TRANSIENT_MARKERS = ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "OVERLOADED")
 
+QUOTA_MARKERS = ("429", "RESOURCE_EXHAUSTED")
+
+MODEL_UNAVAILABLE = "Scheduling by priority - the model is unavailable"
+"""The degrade, said the way the copy table says it: a working system in a
+lesser mode, not a broken one."""
+
+QUOTA_SPENT = "Scheduling by priority - the daily model quota is spent"
+"""The same, for the one failure that will not clear on its own.
+
+The free tier allows 20 generate requests per day per model
+(`GenerateRequestsPerDayPerProjectPerModel-FreeTier`, limit 20, read off the
+live key), and a night that runs for hours can meet it. "Unavailable" would
+imply waiting helps; this lasts until Pacific midnight and the coordinator
+should be told which of the two they are looking at."""
+
+
+def degrade_reason(error: Exception) -> str:
+    """The sentence the board shows when the model call failed.
+
+    The page prints `degraded_reason` verbatim, so this is banner copy, not a
+    diagnostic: a raw `ClientError: 429 RESOURCE_EXHAUSTED {'quotaId': ...}` on
+    screen tells an audience the product broke, when what actually happened is
+    that it fell back to the rule it falls back to. The exception itself is not
+    thrown away — the caller logs it — so the operator still has everything.
+    """
+    haystack = f"{getattr(error, 'code', '')} {error}".upper()
+    if any(marker in haystack for marker in QUOTA_MARKERS):
+        return QUOTA_SPENT
+    return f"{MODEL_UNAVAILABLE}: {error}"
+
 SYSTEM = """You are the production coordinator for a VFX render farm.
 
 A render deadline is going to be missed. The shortfall has already been measured

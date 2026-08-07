@@ -1,9 +1,10 @@
+import logging
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from callsheet.config import Config
-from callsheet.decide import Action, Decision
+from callsheet.decide import MODEL_UNAVAILABLE, QUOTA_SPENT, Action, Decision
 from callsheet.domain import FarmState, Review, Shot
 from callsheet.round import run_round
 from callsheet.session import Session
@@ -88,6 +89,8 @@ async def test_an_annotation_failure_does_not_discard_the_decision():
     assert result.decision is decision, "the decision survives a failed write"
     assert result.annotation_written is False
     assert "503" in result.degraded_reason
+    assert MODEL_UNAVAILABLE not in result.degraded_reason, \
+        "the model answered; it is Grafana that did not, and the banner says so"
 
 
 @pytest.mark.asyncio
@@ -184,3 +187,176 @@ async def test_guard_rejected_actions_are_recorded_and_not_applied():
     # report the -1 sentinel instead — a required shot that never renders.
     assert [(r.shot_id, r.shortfall_s, r.closed) for r in result.residuals] == \
         [("SH001", 170, False)]
+
+
+# --- Asking once ------------------------------------------------------------
+#
+# The free tier allows 20 model calls per day per model, measured against the
+# live key: `GenerateRequestsPerDayPerProjectPerModel-FreeTier, limit: 20`. The
+# timer fires every 30s and a fresh night misses on every round, so a system
+# that asks on every miss is out of quota in ten minutes and 429s on camera.
+
+DEADLINE_S = 10
+"""Re-based on `now` every round, exactly as `server.run_rounds` does. This is
+load-bearing for the tests below and for production: a *fixed* absolute deadline
+would make the shortfall grow by 30s per round, so no two rounds would ever
+share a situation and nothing would ever be reused."""
+
+DOWNGRADE_SH001 = Decision("Dropping SH001 to proxy",
+                           [Action("SH001", "downgrade", "will miss")])
+
+
+def farm(**frame_ms: float) -> FarmState:
+    """A farm where each named shot renders at the given ms per frame."""
+    return FarmState(mean_frame_ms={(shot, "final"): rate
+                                    for shot, rate in frame_ms.items()},
+                     frames_done={})
+
+
+async def a_night(states, shots=SHOTS, required=("SH001",),
+                  decision=DOWNGRADE_SH001, session=None):
+    """Drive one session through consecutive rounds, the way the timer does.
+
+    One farm state per round, 30s apart, through a single `Session` — so the
+    memory that spans rounds is the real one and not a stand-in.
+    """
+    session = session or Session()
+    boards = []
+
+    with patch("callsheet.round.read_farm_state",
+               AsyncMock(side_effect=list(states))), \
+         patch("callsheet.round.decide", return_value=decision) as decide_mock, \
+         patch("callsheet.round.write_annotation",
+               AsyncMock(return_value="ok")) as write_mock:
+        for tick, _ in enumerate(states):
+            now = NOW + tick * 30
+            tonight = Review("R", now + DEADLINE_S, list(required))
+            result = await run_round(CONFIG, shots, tonight, now_epoch_s=now,
+                                     reuse=session.reuse)
+            boards.append(session.record(result, shots, tonight,
+                                         frames_done={}, now_epoch_s=now))
+
+    return boards, decide_mock, write_mock
+
+
+@pytest.mark.asyncio
+async def test_an_unchanged_situation_is_not_asked_about_twice():
+    """The requirement the whole quota problem reduces to.
+
+    SH001 is 170s short in both rounds — the same shot, the same shortfall, the
+    same production question. Judgement has already been passed on it, so the
+    second round reuses that judgement and the day still has 19 calls left.
+    """
+    _, decide_mock, _ = await a_night([farm(SH001=60_000.0),
+                                       farm(SH001=60_000.0)])
+
+    assert decide_mock.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_a_shortfall_that_moves_past_the_bucket_is_asked_about_again():
+    """170s short, then 215s short. The farm has genuinely slowed and the right
+    sacrifice may no longer be the same one, so the model is asked again."""
+    _, decide_mock, _ = await a_night([farm(SH001=60_000.0),
+                                       farm(SH001=75_000.0)])
+
+    assert decide_mock.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_a_shot_newly_at_risk_is_asked_about_again():
+    """A new shot in trouble is a new question even at the same shortfall.
+
+    Rates chosen so SH002's bucket does not move: it is 170s short in the first
+    round and 172s short in the second, both bucket 17. The only thing that
+    changed is that SH001 slipped from 9s to 11s against a 10s deadline and is
+    now missing too — and that alone must re-open the question, because the
+    plan that sacrificed something for SH002 may now be sacrificing the shot
+    that needs saving.
+    """
+    shots = [Shot("SH001", "a.blend", 16, [1, 2, 3]),
+             Shot("SH002", "b.blend", 64, [1, 2, 3])]
+
+    _, decide_mock, _ = await a_night(
+        [farm(SH001=3_000.0, SH002=57_000.0),
+         farm(SH001=3_600.0, SH002=57_000.0)],
+        shots=shots, required=("SH001", "SH002"),
+        decision=Decision("Escalating", [Action("SH002", "escalate", "no lever left")]),
+    )
+
+    assert decide_mock.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_a_reused_decision_still_produces_the_same_board():
+    """Reuse is not a skipped round. The guard still runs, the verifier still
+    runs against the current clock, and the page is served the same call sheet
+    it was served 30s ago — same instructions, same gap, same paper."""
+    boards, _, _ = await a_night([farm(SH001=60_000.0), farm(SH001=60_000.0)])
+    first, second = boards
+
+    assert second.actions == first.actions
+    assert second.residuals == first.residuals
+    assert second.revision == first.revision == 1, \
+        "nothing was amended, so no new stock was issued"
+
+
+@pytest.mark.asyncio
+async def test_a_reused_decision_is_not_annotated_a_second_time():
+    """An annotation records the moment a decision was taken. Re-posting it
+    every 30s would put forty copies of one event on the Grafana timeline and
+    make the dashboard read as a system deciding over and over."""
+    _, _, write_mock = await a_night([farm(SH001=60_000.0), farm(SH001=60_000.0)])
+
+    assert write_mock.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_reuse_is_not_a_degrade():
+    """The banner must stay clear. Not asking a question already answered is
+    the system working correctly, and a page that announced it as a fallback
+    would be reporting good behaviour as failure."""
+    boards, _, _ = await a_night([farm(SH001=60_000.0), farm(SH001=60_000.0)])
+
+    assert [board.degraded_reason for board in boards] == [None, None]
+
+
+@pytest.mark.asyncio
+async def test_a_spent_quota_reaches_the_page_as_english_and_the_log_as_itself(caplog):
+    """What a viewer reads when the day's 20 calls are gone.
+
+    The board prints `degraded_reason` verbatim, so a raw `429
+    RESOURCE_EXHAUSTED` there tells an audience the product broke. It has not:
+    it is scheduling by priority. The operator still needs the real thing, so
+    the exception goes to the log untouched.
+    """
+    state = farm(SH001=60_000.0)
+    review = Review("R", NOW + 10, ["SH001"])
+    error = RuntimeError(
+        "429 RESOURCE_EXHAUSTED. {'quotaId': "
+        "'GenerateRequestsPerDayPerProjectPerModel-FreeTier', 'limit': 20}")
+
+    with caplog.at_level(logging.WARNING), \
+         patch("callsheet.round.read_farm_state", AsyncMock(return_value=state)), \
+         patch("callsheet.round.decide", side_effect=error), \
+         patch("callsheet.round.write_annotation", AsyncMock(return_value="ok")):
+        result = await run_round(CONFIG, SHOTS, review, now_epoch_s=NOW)
+
+    assert result.degraded_reason == QUOTA_SPENT
+    assert "GenerateRequestsPerDayPerProjectPerModel-FreeTier" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_failure_that_is_not_the_quota_still_says_what_it_was():
+    """Only the quota gets its own sentence, because only the quota needs one.
+    Everything else is framed and then quoted: a viewer gets a readable line
+    and whoever is debugging still gets the error."""
+    state = farm(SH001=60_000.0)
+    review = Review("R", NOW + 10, ["SH001"])
+
+    with patch("callsheet.round.read_farm_state", AsyncMock(return_value=state)), \
+         patch("callsheet.round.decide", side_effect=RuntimeError("bad key")), \
+         patch("callsheet.round.write_annotation", AsyncMock(return_value="ok")):
+        result = await run_round(CONFIG, SHOTS, review, now_epoch_s=NOW)
+
+    assert result.degraded_reason == f"{MODEL_UNAVAILABLE}: bad key"

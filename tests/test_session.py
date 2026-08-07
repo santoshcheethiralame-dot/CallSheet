@@ -5,7 +5,7 @@ from callsheet.decide import Action, Decision
 from callsheet.domain import Review, Shot
 from callsheet.forecast import Forecast
 from callsheet.round import RoundResult
-from callsheet.session import Session, open_night
+from callsheet.session import Session, open_night, situation
 from callsheet.verify import Residual
 
 NOW = 1_000_000
@@ -258,6 +258,71 @@ def test_a_session_with_no_queue_behind_it_reports_no_progress():
 def test_a_session_has_no_board_until_a_round_has_run():
     """The server needs this to know whether to fall back to the disk board."""
     assert Session().board is None
+
+
+# --- The situation key ------------------------------------------------------
+#
+# `amendment` decides two decisions are the same after the model has already
+# been paid for. These decide whether the *question* is the same, before it is
+# asked. SH003 in BEHIND lands at NOW+118 against a NOW+30 deadline: 88s short,
+# bucket 8.
+
+
+def a_miss(shot_id, finishes_at):
+    return Forecast(shot_id, 3, 0.0, finishes_at, True, "observed")
+
+
+def test_a_second_of_drift_is_not_a_new_situation():
+    """The raw shortfall never repeats exactly — telemetry means move with
+    every frame and the forecast rounds up. Keyed on the exact number, nothing
+    would ever match and the bucket would be doing no work at all."""
+    drifted = [QUIET[0], QUIET[1], a_miss("SH003", NOW + 119)]
+
+    assert situation(drifted, REVIEW) == situation(BEHIND, REVIEW)
+
+
+def test_a_shortfall_that_moves_a_bucket_is_a_new_situation():
+    """88s short, then 100s short. Twelve seconds is a frame and a half here,
+    and the plan that covered the first gap may not cover the second."""
+    worse = [QUIET[0], QUIET[1], a_miss("SH003", NOW + 130)]
+
+    assert situation(worse, REVIEW) != situation(BEHIND, REVIEW)
+
+
+def test_a_newly_missing_shot_is_a_new_situation_at_the_same_shortfall():
+    """SH003 is 88s short in both. The key still differs, because which shots
+    are in trouble is half the question and not a detail of how late they are."""
+    both = [a_miss("SH001", NOW + 40), QUIET[1], BEHIND[2]]
+
+    assert situation(both, REVIEW) != situation(BEHIND, REVIEW)
+
+
+def test_a_night_with_nothing_missing_has_nothing_to_reuse():
+    """A quiet round never reaches the model, so there is no answer standing
+    for it — and an empty key must not be allowed to match another empty one
+    and hand back a decision made about a farm that was in trouble."""
+    session = Session()
+    record(session, a_round(decision=PREEMPT_SH002))
+
+    assert session.reuse(QUIET, REVIEW) is None
+
+
+def test_the_same_situation_hands_back_the_decision_already_made():
+    session = Session()
+    record(session, a_round(BEHIND, decision=PREEMPT_SH002))
+
+    assert session.reuse(BEHIND, REVIEW) is PREEMPT_SH002
+
+
+def test_a_round_that_never_got_an_answer_leaves_nothing_to_reuse():
+    """The quota rolls over at Pacific midnight and a night running through it
+    should come back on its own, so a situation whose call failed is asked
+    again next tick. Retrying costs nothing while the quota is spent: a request
+    refused for quota is refused before it is counted."""
+    session = Session()
+    record(session, a_round(BEHIND, degraded_reason="429 RESOURCE_EXHAUSTED"))
+
+    assert session.reuse(BEHIND, REVIEW) is None
 
 
 def test_events_survive_across_rounds():

@@ -522,10 +522,15 @@ function apply(state) {
   document.getElementById("review").textContent =
     state.review_name + (deadline ? " · " + timecode(deadline) : "");
 
+  // Verbatim. The reason arrives already written as a sentence, because the
+  // engine knows which degrade this is and the page does not: it used to staple
+  // "the model is unavailable" onto every one of them, which said the model was
+  // out when Grafana had refused a write, and would now say it twice when the
+  // day's quota is spent.
   const banner = document.getElementById("degraded");
   banner.dataset.show = String(Boolean(state.degraded_reason));
   if (state.degraded_reason) {
-    banner.textContent = "Scheduling by priority — the model is unavailable. " + state.degraded_reason;
+    banner.textContent = state.degraded_reason;
   }
 
   renderCards(state.cards || []);

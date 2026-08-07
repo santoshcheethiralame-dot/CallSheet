@@ -1,5 +1,8 @@
+import asyncio
 import json
+from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from callsheet import server
@@ -129,3 +132,30 @@ def test_the_stream_event_carries_the_whole_board():
     payload = json.loads(event.split("data: ", 1)[1])
     assert "cards" in payload
     assert "revision" in payload
+
+
+@pytest.mark.asyncio
+async def test_the_timer_hands_the_round_the_session_that_remembers():
+    """The wiring, pinned. Everything that keeps this system inside the free
+    tier lives behind one keyword argument: the round asks whoever it was given
+    whether this situation has already been judged, and in production that has
+    to be the session holding the night's memory. Dropped, the round silently
+    goes back to asking the model on every miss and the day's 20 calls are gone
+    in ten minutes — with every test but this one still green.
+    """
+    session = Session()
+    seen: dict = {}
+
+    async def capture(*_args, **kwargs):
+        seen.update(kwargs)
+        # The one way out of an endless timer. `run_rounds` catches `Exception`
+        # and keeps its next appointment; `CancelledError` is not one.
+        raise asyncio.CancelledError
+
+    with patch("callsheet.server.run_round", capture), \
+         pytest.raises(asyncio.CancelledError):
+        # The config is only ever handed onward to the round, which is patched.
+        await server.run_rounds(None, session, [],
+                                Review("Director review", 1_000_030, []))
+
+    assert seen["reuse"] == session.reuse

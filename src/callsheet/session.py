@@ -20,9 +20,9 @@ from pathlib import Path
 
 from callsheet import queue
 from callsheet.board import BoardEvent, BoardState, build_board, revision_stock
-from callsheet.decide import Action, Decision
+from callsheet.decide import MODEL_UNAVAILABLE, Action, Decision
 from callsheet.domain import Review, Shot
-from callsheet.forecast import misses
+from callsheet.forecast import Forecast, misses
 from callsheet.guard import surviving
 from callsheet.round import RoundResult
 
@@ -36,9 +36,53 @@ MAX_EVENTS = 200
 A night runs for hours on a timer, so an uncapped list is a slow leak that also
 grows every SSE frame on the wire."""
 
-MODEL_UNAVAILABLE = "Scheduling by priority - the model is unavailable"
-"""The degrade, said the way the copy table says it: a working system in a
-lesser mode, not a broken one."""
+__all__ = ["MODEL_UNAVAILABLE", "Session", "amendment", "open_night", "situation"]
+"""`MODEL_UNAVAILABLE` is re-exported rather than defined here: the feed and the
+banner have to say the same thing, and the banner's copy is chosen in `decide`,
+which is the only module that knows what went wrong with the model."""
+
+SHORTFALL_BUCKET_S = 10
+"""How much a shortfall must move before it counts as a different situation.
+
+The free tier allows 20 model calls per day per model. A round fires every 30s
+and a fresh night misses on every one of them, so asking on every miss spends
+the day in ten minutes. The fix is to ask only when the *question* is new, and
+that requires deciding when two questions are the same.
+
+Bucketing, not equality, because the raw shortfall never repeats exactly: the
+forecast rounds up to the whole second, telemetry means drift with every frame,
+and a shot that is 63s short this round is 62s short the next while being the
+identical production problem with the identical answer. Ten seconds is set
+against what a change would have to be worth: a frame is 8-60s here, so one
+frame finishing early or a render slowing down moves a shortfall clear across a
+bucket, while per-frame jitter and rounding do not. Coarser and a real shift in
+the plan could hide inside a bucket; finer and the drift alone re-asks.
+
+The one artefact is the boundary: a shortfall crossing 19s -> 20s re-asks over
+one second of movement. That is the cheap direction to fail in - it costs one
+call, where the other direction would reuse a stale plan.
+"""
+
+
+def situation(forecasts: Sequence[Forecast], review: Review) -> frozenset:
+    """What the model would be asked about, as a comparable key.
+
+    Which required shots are going to be late, and by roughly how much. Nothing
+    else: not the wording, not the clock, not the shots that are on time, and
+    not the absolute finish times — `run_rounds` re-bases the deadline on `now`
+    every round, so an ETA moves 30s per round while the farm stands still. The
+    *shortfall* is what holds steady, which is the whole reason it is the thing
+    keyed on.
+
+    An empty key means no shot is missing, which is not a situation anyone needs
+    judged; `Session.reuse` treats it as nothing to reuse rather than as a
+    situation that happens to match.
+    """
+    return frozenset(
+        (forecast.shot_id,
+         (forecast.finishes_at_epoch_s - review.deadline_epoch_s) // SHORTFALL_BUCKET_S)
+        for forecast in misses(list(forecasts))
+    )
 
 
 def amendment(decision: Decision | None, applied: Sequence[Action]) -> tuple | None:
@@ -110,6 +154,34 @@ class Session:
         self._degraded: str | None = None
         self._missing: frozenset[str] = frozenset()
 
+        self._situation: frozenset = frozenset()
+        self._decision: Decision | None = None
+        """The last situation judged, and what was judged about it. Together
+        they are the standing answer `reuse` hands back."""
+
+    def reuse(self, forecasts: Sequence[Forecast], review: Review) -> Decision | None:
+        """The decision already made about this situation, if it is this one.
+
+        Handed to `run_round` so the model is asked only when the question has
+        changed. This is the same judgement `amendment` makes — "is this really
+        different?" — moved to where it can still save something. `amendment`
+        makes it *after* the call, which stops the paper being reissued but not
+        the quota being spent; this makes it before. The two now stack: this one
+        keeps an unchanged night from asking, and `amendment` still catches the
+        case where the situation genuinely changed and the model came back with
+        the same plan anyway.
+
+        A situation whose last call *failed* is not reusable — there is nothing
+        to reuse — so a degraded round retries next tick. That is deliberate:
+        the quota rolls over at Pacific midnight and a night running through it
+        should recover by itself. The retries cost nothing while it is spent,
+        because a request refused for quota is refused before it is counted.
+        """
+        key = situation(forecasts, review)
+        if key and key == self._situation and self._decision is not None:
+            return self._decision
+        return None
+
     def progress(self) -> dict[str, int]:
         """Frames completed per shot, from the queue and nowhere else.
 
@@ -146,6 +218,7 @@ class Session:
         self._announce_misses(result, review, now_epoch_s)
         self._announce_degrade(result, now_epoch_s)
         self._issue(result.decision, applied, now_epoch_s)
+        self._remember(result, review)
 
         self.board = build_board(
             shots, review, result.forecasts, result.decision, applied,
@@ -176,6 +249,16 @@ class Session:
         if result.degraded_reason and result.degraded_reason != self._degraded:
             self.say(MODEL_UNAVAILABLE, now_epoch_s)
         self._degraded = result.degraded_reason
+
+    def _remember(self, result: RoundResult, review: Review) -> None:
+        """Note what the round was asked and what came back, for `reuse`.
+
+        Recorded here rather than in `reuse` so the pairing cannot drift: the
+        key is taken from the forecasts the decision was actually made against,
+        not from the ones that were current when the question was asked.
+        """
+        self._situation = situation(result.forecasts, review)
+        self._decision = result.decision
 
     def _issue(self, decision: Decision | None, applied: Sequence[Action],
                now_epoch_s: int) -> None:
