@@ -4,7 +4,7 @@
 **Event:** Google Cloud Agentic Cinema Hackathon (Devpost), Grafana partner track
 **Deadline:** 2026-09-07, 14:00 PT — 31 days
 **Builder:** solo
-**Status:** Phase 1 complete — telemetry spine proven end to end (7 Aug 2026)
+**Status:** Phases 1–4 complete — live board over a real farm, 184 tests (7 Aug 2026)
 
 ---
 
@@ -113,8 +113,9 @@ Each round:
 5. Write a Grafana annotation, emit the call sheet
 
 **Principle: the LLM does judgement, code does arithmetic.** This is a maturity
-signal to partner judges and it is what keeps the system inside a 250-request
-daily quota.
+signal to partner judges, and it is half of what keeps the system inside a
+**20-request daily quota**. The other half is §16's rule: the model is asked only
+when the *question* has changed, not on every round.
 
 ### 5.4 Product surface
 
