@@ -509,6 +509,42 @@ the output, reset the queue, and let the board fill in as frames land. That is
 better footage anyway: a night starting empty and going wrong beats a night
 already over.
 
+## 16. Phase 5 findings
+
+**The queue is now the single source of progress.** The session opens
+`callsheet.db` at startup, seeds it from the manifest, and reconciles it against
+`out/` — every frame whose PNG exists is marked done. Each round then reads
+`Session.progress()` **once** and hands the same dict to `run_round` and to
+`build_board`, so the forecast and the cards agree by construction rather than
+by coincidence. `parse_farm_state` is unchanged and still refuses to report
+progress: the fix was to give the forecaster the queue's answer, not to teach
+the telemetry layer to guess.
+
+**A finished shot was being charged the wait in front of it.** The deeper half
+of the contradiction, and it survives the wiring above. `forecast_all` walks a
+serial cursor, so a shot with zero frames remaining still "finished" at the
+accumulated wait of everything ahead — 3/3 on its card and short of the deadline
+on the call sheet beside it, from the same numbers. A shot with nothing left to
+render is done, whatever is queued in front of it.
+
+**Pinned by `test_a_shot_the_queue_calls_complete_is_never_in_an_unclosed_residual`.**
+It drives a real round with SH003 complete and SH001 untouched, builds the board
+from the same dict, and asserts the complete set and the unclosed-residual set
+do not intersect.
+
+**A finished board demonstrates nothing, so `scripts/fresh_night.py` empties the
+stage** — deletes the rendered frames, returns every job to `pending`, and lets
+the next session open on white paper. It deletes real files, so it prints every
+one first and refuses outright if `out/` holds anything that is not a
+`SH*_*.png`. That guard earned itself immediately: it stopped on
+`out/probe_0001.png`, an orphan from the Phase 1 spike that nothing in the repo
+produces any more.
+
+**The revision resets by restart, not by script.** `Session.revision` lives in
+the process, so `fresh_night.py` cannot reach a running server's copy of it. The
+script says so and the demo order is: stop the server, clear the night, start
+the server.
+
 ---
 
 _Living doc. Update the same day a decision changes._
