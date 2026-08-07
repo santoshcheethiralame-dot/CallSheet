@@ -87,8 +87,11 @@ def test_a_different_decision_issues_another_revision():
     assert board.stock == "pink"
 
 
-def test_a_reworded_summary_is_a_new_revision():
-    """The summary is the sentence printed on the paper. Different paper."""
+def test_a_reworded_summary_is_not_a_new_revision():
+    """Observed live: the same plan came back on the next round as "to clear the
+    queue ahead of SH003" instead of "to allow SH003 to finish". Same
+    instruction, new sentence. Reissuing on that puts the revision back on the
+    timer, which is the one thing it must never be."""
     session = Session()
 
     record(session, a_round(decision=PREEMPT_SH002))
@@ -97,7 +100,9 @@ def test_a_reworded_summary_is_a_new_revision():
         list(PREEMPT_SH002.actions),
     )), now=NOW + 30)
 
-    assert board.revision == 2
+    assert board.revision == 1
+    assert board.summary == "Striking SH002 so the director sees SH003", \
+        "the paper still shows the latest wording; it is just not a new revision"
 
 
 def test_the_revision_follows_what_the_guard_allowed_not_what_was_proposed():
@@ -130,8 +135,9 @@ def test_events_are_capped_so_a_long_night_cannot_grow_unbounded():
     session = Session(max_events=3)
 
     for index in range(10):
-        record(session, a_round(decision=Decision(f"Plan {index}", [])),
-               now=NOW + index)
+        record(session, a_round(decision=Decision(
+            f"Plan {index}", [Action(f"SH{index:03d}", "preempt", "cut")],
+        )), now=NOW + index)
 
     assert len(session.events) == 3
     assert session.events[-1].text == "Revision 10 issued - goldenrod"

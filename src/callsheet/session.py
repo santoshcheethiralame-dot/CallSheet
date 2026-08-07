@@ -36,22 +36,26 @@ lesser mode, not a broken one."""
 def amendment(decision: Decision | None, applied: Sequence[Action]) -> tuple | None:
     """What makes this call sheet different from the last one.
 
-    The summary and the actions **the guard allowed**, because those two are the
-    call sheet: the sentence the coordinator says out loud and the instructions
-    the crew is given. Proposed-but-rejected actions are excluded — they were
-    never carried out, and reissuing the paper because the model wanted
-    something the code refused would announce an amendment that did not happen.
+    The actions **the guard allowed** — what the crew is actually being told to
+    do — and nothing else. Proposed-but-rejected actions are excluded because
+    they were never carried out, and reissuing the paper for something the code
+    refused would announce an amendment that did not happen.
 
-    `Action.reason` is deliberately left out. It is model prose attached to an
-    instruction, and it drifts in wording between calls that produce the exact
-    same plan; keying on it would issue a fresh revision every timer tick for a
-    rephrased note. The summary is prose too and *is* included, because it is
-    printed on the paper — if the coordinator says something different, the crew
-    is holding a different document.
+    No prose. Not `Action.reason`, and not `decision.summary` either, which is
+    the harder call and was settled by watching it run: with the farm unchanged
+    and the same prompt, two consecutive rounds returned the identical plan
+    (preempt SH002) worded differently — "to allow required shot SH003 to
+    finish", then "to clear the queue ahead of SH003" — and keying on the
+    summary reissued the call sheet for it. That is the exact failure the
+    revision exists to avoid: advancing on the timer rather than on a decision,
+    which makes the stock colour a clock. A production reissues coloured paper
+    when the instructions change, not when someone rephrases a note; the newest
+    summary still prints on the paper either way, it just does not claim to be
+    a new revision.
     """
     if decision is None:
         return None
-    return (decision.summary, tuple((a.shot_id, a.action) for a in applied))
+    return tuple((action.shot_id, action.action) for action in applied)
 
 
 class Session:
