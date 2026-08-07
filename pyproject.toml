@@ -9,10 +9,14 @@ dependencies = [
     "mcp>=1.2",
     "python-dotenv>=1.0",
     "google-genai>=1.0",
+    "fastapi>=0.110",
+    "uvicorn>=0.30",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+# httpx is not used by the app: it is what `fastapi.testclient` drives the ASGI
+# app with, so the server tests cannot collect without it.
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "httpx>=0.27"]
 
 [build-system]
 requires = ["setuptools>=68"]
