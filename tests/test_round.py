@@ -6,6 +6,7 @@ from callsheet.config import Config
 from callsheet.decide import Action, Decision
 from callsheet.domain import FarmState, Review, Shot
 from callsheet.round import run_round
+from callsheet.session import Session
 
 NOW = 1_000_000
 # Keyword args deliberately: Config's field order changed in Task 4, and
@@ -104,6 +105,63 @@ async def test_an_insufficient_decision_is_reported_as_such_not_as_success():
     assert result.residuals
     assert result.residuals[0].closed is False
     assert result.residuals[0].shortfall_s > 0
+
+
+@pytest.mark.asyncio
+async def test_the_caller_supplies_the_progress_the_telemetry_still_refuses_to():
+    """`parse_farm_state` deliberately never reports progress, and it still
+    does not. The round takes the queue's answer from whoever holds the queue
+    and merges it in, rather than teaching the telemetry layer to guess."""
+    state = FarmState(mean_frame_ms={("SH001", "final"): 1000.0})
+    review = Review("R", NOW + 3600, ["SH001"])
+
+    with patch("callsheet.round.read_farm_state", AsyncMock(return_value=state)), \
+         patch("callsheet.round.write_annotation", AsyncMock(return_value="ok")):
+        result = await run_round(CONFIG, SHOTS, review, now_epoch_s=NOW,
+                                 frames_done={"SH001": 2})
+
+    assert result.forecasts[0].frames_remaining == 1
+    assert state.frames_done == {}, \
+        "the observed state is copied, not mutated - telemetry still says nothing"
+
+
+@pytest.mark.asyncio
+async def test_a_shot_the_queue_calls_complete_is_never_in_an_unclosed_residual():
+    """The self-contradiction Phase 4 shipped, pinned shut.
+
+    SH003's card read `in_the_can 3/3` while the call sheet beside it said SH003
+    was 18s short: the cards counted PNGs on disk and the forecaster read
+    `FarmState.frames_done`, which nothing ever populated. Here one dict — the
+    queue's answer — goes into the round and into the board, so the two halves
+    of the page are reading the same number and cannot disagree by construction.
+    """
+    shots = [Shot("SH001", "a.blend", 16, [1, 2, 3]),
+             Shot("SH003", "c.blend", 256, [1, 2, 3])]
+    review = Review("Director review", NOW + 10, ["SH001", "SH003"])
+    state = FarmState(mean_frame_ms={("SH001", "final"): 60_000.0,
+                                     ("SH003", "final"): 60_000.0})
+    done = {"SH003": 3}     # the queue: SH003 is finished, SH001 has not started
+    decision = Decision("Dropping SH001 to proxy",
+                        [Action("SH001", "downgrade", "will miss")])
+
+    with patch("callsheet.round.read_farm_state", AsyncMock(return_value=state)), \
+         patch("callsheet.round.decide", return_value=decision), \
+         patch("callsheet.round.write_annotation", AsyncMock(return_value="ok")):
+        result = await run_round(CONFIG, shots, review, now_epoch_s=NOW,
+                                 frames_done=done)
+
+    board = Session().record(result, shots, review, frames_done=done,
+                             now_epoch_s=NOW)
+
+    complete = {card.shot_id for card in board.cards
+                if card.frames_done >= card.frames_total}
+    unclosed = {residual.shot_id for residual in board.residuals
+                if not residual.closed}
+
+    assert complete == {"SH003"}, "the card says SH003 is in the can"
+    assert unclosed == {"SH001"}, "and the call sheet still reports the real gap"
+    assert not complete & unclosed, \
+        "no shot may be complete and short of the deadline at the same time"
 
 
 @pytest.mark.asyncio

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 
 from callsheet.annotate import write_annotation
@@ -30,13 +31,24 @@ class RoundResult:
 
 
 async def run_round(config: Config, shots: list[Shot], review: Review,
-                    now_epoch_s: int) -> RoundResult:
+                    now_epoch_s: int,
+                    frames_done: dict[str, int] | None = None) -> RoundResult:
     """Observe the farm, forecast the deadline, and judge only if it is missed.
 
     `shots` is passed to the forecaster in the order given, and that order is
     the render order — see `forecast_all`.
+
+    `frames_done` is progress, and it arrives from the caller because the caller
+    holds the job queue. `parse_farm_state` still refuses to report it (§13:
+    telemetry answers *how fast*, the queue answers *what is left*) — the fix
+    for the board contradicting itself is not to make the telemetry layer start
+    guessing, it is to hand the forecaster the same number the cards are drawn
+    from. One dict, merged here, read by the forecast and the verifier and then
+    passed to `build_board` unchanged.
     """
     state = await read_farm_state(config)
+    if frames_done is not None:
+        state = dataclasses.replace(state, frames_done=dict(frames_done))
     forecasts = forecast_all(shots, review, state, now_epoch_s)
 
     # A healthy farm costs zero model calls. That is not an optimisation, it is

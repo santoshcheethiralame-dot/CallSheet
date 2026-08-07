@@ -13,15 +13,23 @@ scrolls without saying anything. Both would look alive and mean nothing.
 
 from __future__ import annotations
 
+import sqlite3
 import time
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 
+from callsheet import queue
 from callsheet.board import BoardEvent, BoardState, build_board, revision_stock
 from callsheet.decide import Action, Decision
 from callsheet.domain import Review, Shot
 from callsheet.forecast import misses
 from callsheet.guard import surviving
 from callsheet.round import RoundResult
+
+ROOT = Path(__file__).resolve().parents[2]
+DB_PATH = ROOT / "callsheet.db"
+"""The night's queue, on disk rather than in memory: a server restarted at 2am
+must not forget what has already rendered."""
 
 MAX_EVENTS = 200
 """The feed shows the most recent handful; this is the tail the server keeps.
@@ -58,11 +66,40 @@ def amendment(decision: Decision | None, applied: Sequence[Action]) -> tuple | N
     return tuple((action.shot_id, action.action) for action in applied)
 
 
+def open_night(shots: Sequence[Shot], out_dir: Path,
+               path: Path = DB_PATH) -> sqlite3.Connection:
+    """Open the job queue for tonight and make it agree with the disk.
+
+    Three steps, in this order and no other. The schema, then the manifest —
+    `enqueue_manifest` never resurrects a finished row, so re-running it is
+    free. Then the reconciliation: every frame whose PNG is already sitting in
+    `out/` is marked done, because a queue that starts a fresh boot claiming
+    nine frames of work when nine frames exist would send the forecaster off to
+    re-render a finished night.
+
+    Reconciling *from* disk rather than trusting it thereafter is the point.
+    Disk seeds the queue once; from then on the queue is what anyone asks.
+    """
+    conn = sqlite3.connect(path, check_same_thread=False)
+    queue.init_db(conn)
+    queue.enqueue_manifest(conn, list(shots))
+    for shot in shots:
+        for frame in shot.frames:
+            if (Path(out_dir) / f"{shot.id}_{frame:04d}.png").exists():
+                queue.mark_done(conn, shot.id, frame)
+    return conn
+
+
 class Session:
     """One running night. Mutable on purpose; the board it hands out is not."""
 
-    def __init__(self, max_events: int = MAX_EVENTS) -> None:
+    def __init__(self, max_events: int = MAX_EVENTS,
+                 conn: sqlite3.Connection | None = None) -> None:
         self.max_events = max_events
+        self.conn = conn
+        """The night's job queue, or `None` when there is no live round behind
+        this session — the board tests and the no-credentials server path."""
+
         self.revision = 0
         self.events: list[BoardEvent] = []
         self.board: BoardState | None = None
@@ -72,6 +109,15 @@ class Session:
         self._issued: tuple | None = None
         self._degraded: str | None = None
         self._missing: frozenset[str] = frozenset()
+
+    def progress(self) -> dict[str, int]:
+        """Frames completed per shot, from the queue and nowhere else.
+
+        The caller hands this same dict to `run_round` and to `record`, which is
+        the whole fix: the forecast and the cards cannot disagree about how much
+        of a shot is finished when they are reading one number.
+        """
+        return queue.frames_done(self.conn) if self.conn is not None else {}
 
     def say(self, text: str, at_epoch_s: int) -> None:
         self.events.append(BoardEvent(at_epoch_s, text))
@@ -88,10 +134,11 @@ class Session:
     ) -> BoardState:
         """Fold one round into the night and return the board as it now stands.
 
-        `frames_done` comes from the driver rather than the round because it is
-        what has actually been written to disk — the only place on the page
-        showing real pixels — while the forecast counts what the farm has told
-        Grafana. Those can disagree, and the cards should show the frames.
+        `frames_done` comes from the driver rather than the round because the
+        driver holds the queue, and it must be the *same* dict the driver gave
+        `run_round`. Passing the queue's answer here and letting the forecast
+        use another is precisely the bug this argument exists to prevent: a card
+        reading 3/3 beside a call sheet saying the shot is 18s short.
         """
         applied = (surviving(result.decision.actions, result.guard_rejections)
                    if result.decision is not None else [])

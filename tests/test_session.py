@@ -5,7 +5,7 @@ from callsheet.decide import Action, Decision
 from callsheet.domain import Review, Shot
 from callsheet.forecast import Forecast
 from callsheet.round import RoundResult
-from callsheet.session import Session
+from callsheet.session import Session, open_night
 from callsheet.verify import Residual
 
 NOW = 1_000_000
@@ -220,6 +220,39 @@ def test_frames_on_disk_reach_the_cards():
     card = next(c for c in board.cards if c.shot_id == "SH001")
     assert card.frames_done == 2
     assert card.thumbnail == "/frames/SH001_0002.png"
+
+
+def test_the_queue_is_reconciled_with_the_frames_already_on_disk(tmp_path):
+    """First boot must not re-plan a night that is already half rendered."""
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "SH001_0001.png").write_bytes(b"\x89PNG")
+    (out / "SH001_0002.png").write_bytes(b"\x89PNG")
+
+    session = Session(conn=open_night(SHOTS, out, tmp_path / "callsheet.db"))
+
+    assert session.progress() == {"SH001": 2}
+
+
+def test_reopening_the_queue_does_not_lose_work_whose_frames_are_gone(tmp_path):
+    """Disk seeds the queue once. After that the queue is the answer, and a
+    frame deleted out from under it does not undo the work it records."""
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "SH001_0001.png").write_bytes(b"\x89PNG")
+    db = tmp_path / "callsheet.db"
+    open_night(SHOTS, out, db).close()
+
+    (out / "SH001_0001.png").unlink()
+    session = Session(conn=open_night(SHOTS, out, db))
+
+    assert session.progress() == {"SH001": 1}
+
+
+def test_a_session_with_no_queue_behind_it_reports_no_progress():
+    """The no-credentials path: no live round, so no queue, and the server
+    falls back to counting the disk rather than being handed a wrong number."""
+    assert Session().progress() == {}
 
 
 def test_a_session_has_no_board_until_a_round_has_run():

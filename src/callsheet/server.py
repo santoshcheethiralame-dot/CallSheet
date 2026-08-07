@@ -27,7 +27,7 @@ from callsheet.board import BoardState, build_board
 from callsheet.config import Config
 from callsheet.domain import Review, Shot, load_review, load_shots
 from callsheet.round import RoundResult, run_round
-from callsheet.session import Session
+from callsheet.session import Session, open_night
 
 log = logging.getLogger(__name__)
 
@@ -69,7 +69,13 @@ def load_config() -> Config:
 
 
 def frames_on_disk(shots: list[Shot]) -> dict[str, int]:
-    """What the farm has actually written — the only real pixels on the page."""
+    """What the farm has actually written, counted straight off the filesystem.
+
+    Only for the board served when no round is running — no credentials, no
+    session, therefore no queue. Every other path reads `Session.progress()`,
+    which is the queue; this one exists so a judge with an empty `.env` still
+    gets cards that match the pixels.
+    """
     if not OUT_DIR.is_dir():
         return {}
     return {shot.id: len(list(OUT_DIR.glob(f"{shot.id}_*.png"))) for shot in shots}
@@ -87,14 +93,19 @@ async def run_rounds(config: Config, session: Session, shots: list[Shot],
     while True:
         now = int(time.time())
         tonight = dataclasses.replace(review, deadline_epoch_s=now + DEADLINE_S)
+
+        # Read once, hand to both. The forecast and the cards disagreeing about
+        # how much of a shot is finished was the board's self-contradiction;
+        # they cannot disagree about a number they were both handed.
+        done = session.progress()
         try:
-            result = await run_round(config, shots, tonight, now_epoch_s=now)
+            result = await run_round(config, shots, tonight, now_epoch_s=now,
+                                     frames_done=done)
         except Exception as error:      # noqa: BLE001 — the loop degrades, never dies
             log.warning("round failed: %s", error)
             result = RoundResult([], None, False, degraded_reason=str(error))
 
-        session.record(result, shots, tonight,
-                       frames_done=frames_on_disk(shots), now_epoch_s=now)
+        session.record(result, shots, tonight, frames_done=done, now_epoch_s=now)
         await asyncio.sleep(ROUND_INTERVAL_S)
 
 
@@ -115,7 +126,7 @@ def start_rounds() -> asyncio.Task | None:
         log.info("no live round: %s", error)
         return None
 
-    _session = Session()
+    _session = Session(conn=open_night(shots, OUT_DIR))
     return asyncio.create_task(run_rounds(config, _session, shots, review))
 
 
