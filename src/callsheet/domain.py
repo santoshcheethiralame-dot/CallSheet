@@ -30,7 +30,14 @@ class Review:
 class FarmState:
     """What Grafana currently knows about the farm."""
 
-    mean_frame_ms: dict[str, float] = field(default_factory=dict)
+    mean_frame_ms: dict[tuple[str, str], float] = field(default_factory=dict)
+    """Observed mean frame duration keyed by `(shot_id, quality)`.
+
+    Keyed by both because a proxy frame and a final frame of the same shot are
+    different amounts of work — measurably so — and a scheduler that downgrades
+    a shot needs the rate for the tier it is actually going to render.
+    """
+
     frames_done: dict[str, int] = field(default_factory=dict)
 
 

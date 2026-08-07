@@ -25,7 +25,7 @@ SHOTS = [Shot("SH001", "a.blend", 16, [1, 2, 3], priority=90)]
 @pytest.mark.asyncio
 async def test_healthy_farm_makes_no_model_call():
     """The free tier survives only if a quiet round costs nothing."""
-    state = FarmState(mean_frame_ms={"SH001": 1000.0}, frames_done={})
+    state = FarmState(mean_frame_ms={("SH001", "final"): 1000.0}, frames_done={})
     review = Review("R", NOW + 3600, ["SH001"])
 
     with patch("callsheet.round.read_farm_state", AsyncMock(return_value=state)), \
@@ -40,7 +40,7 @@ async def test_healthy_farm_makes_no_model_call():
 
 @pytest.mark.asyncio
 async def test_a_forecast_miss_triggers_a_decision_and_an_annotation():
-    state = FarmState(mean_frame_ms={"SH001": 60_000.0}, frames_done={})
+    state = FarmState(mean_frame_ms={("SH001", "final"): 60_000.0}, frames_done={})
     review = Review("R", NOW + 10, ["SH001"])
     decision = Decision("late", [Action("SH001", "downgrade", "will miss")])
 
@@ -58,7 +58,7 @@ async def test_a_forecast_miss_triggers_a_decision_and_an_annotation():
 @pytest.mark.asyncio
 async def test_a_model_failure_does_not_abort_the_round():
     """Quota exhaustion must degrade, not crash — the demo has to survive it."""
-    state = FarmState(mean_frame_ms={"SH001": 60_000.0}, frames_done={})
+    state = FarmState(mean_frame_ms={("SH001", "final"): 60_000.0}, frames_done={})
     review = Review("R", NOW + 10, ["SH001"])
 
     with patch("callsheet.round.read_farm_state", AsyncMock(return_value=state)), \
@@ -75,7 +75,7 @@ async def test_a_model_failure_does_not_abort_the_round():
 @pytest.mark.asyncio
 async def test_an_annotation_failure_does_not_discard_the_decision():
     """A Grafana blip must not throw away work that already succeeded."""
-    state = FarmState(mean_frame_ms={"SH001": 60_000.0}, frames_done={})
+    state = FarmState(mean_frame_ms={("SH001", "final"): 60_000.0}, frames_done={})
     review = Review("R", NOW + 10, ["SH001"])
     decision = Decision("late", [Action("SH001", "downgrade", "will miss")])
 

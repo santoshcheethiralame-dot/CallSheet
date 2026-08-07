@@ -44,11 +44,13 @@ def forecast_all(
     caller's list order *is* the render order, and reordering the queue is one
     of the levers a scheduler has. Pass shots in the order they will render.
 
-    Per-shot mean frame duration is read from observed telemetry and already
-    includes Blender's fixed startup cost for that shot, so no separate
-    overhead term is modelled. Shots with no observed history fall back to
-    `fallback_frame_ms` and are marked `estimate_source="fallback"`, so a guess
-    can never be mistaken for a measurement further down the pipeline.
+    Mean frame duration is read from observed telemetry keyed by
+    `(shot, quality)` and already includes Blender's fixed startup cost for that
+    shot, so no separate overhead term is modelled. The rate is looked up at the
+    tier the shot will actually render at; failing that, at `final`; failing
+    that, `fallback_frame_ms`. Only an exact tier match counts as
+    `estimate_source="observed"` — both other paths are marked `"fallback"`, so
+    a guess can never be mistaken for a measurement further down the pipeline.
 
     Completion times round *up* to the whole second. A forecaster that floors
     can report a shot finishing exactly on the deadline when it truly lands a
@@ -61,8 +63,18 @@ def forecast_all(
     for shot in shots:
         done = state.frames_done.get(shot.id, 0)
         remaining = max(0, len(shot.frames) - done)
-        observed = state.mean_frame_ms.get(shot.id)
-        per_frame = fallback_frame_ms if observed is None else observed
+        observed = state.mean_frame_ms.get((shot.id, shot.quality))
+        if observed is not None:
+            per_frame, source = observed, OBSERVED
+        elif (shot.id, "final") in state.mean_frame_ms:
+            # The shot has history, but not at the tier it is about to render.
+            # The final rate is the best number available and still a guess:
+            # proxy is measurably cheaper, so this over-estimates, and saying
+            # "observed" would dress that guess up as a measurement.
+            per_frame, source = state.mean_frame_ms[(shot.id, "final")], FALLBACK
+        else:
+            per_frame, source = fallback_frame_ms, FALLBACK
+
         predicted = remaining * per_frame
 
         cursor_ms += predicted
@@ -76,7 +88,7 @@ def forecast_all(
                 predicted_ms=predicted,
                 finishes_at_epoch_s=finishes_at,
                 misses_deadline=required and finishes_at > review.deadline_epoch_s,
-                estimate_source=FALLBACK if observed is None else OBSERVED,
+                estimate_source=source,
             )
         )
 
