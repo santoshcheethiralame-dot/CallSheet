@@ -396,4 +396,34 @@ SH003 26815 ms.
 
 ---
 
+## 14. Phase 3 findings
+
+**The proxy speedup is real, modest, and shot-dependent — which is why it had to
+be measured.** Rendering every shot at both tiers and reading the rate back per
+`(shot, quality)`:
+
+| Shot | final | proxy | speedup |
+|---|---|---|---|
+| SH001 | 7031 ms | 6508 ms | **1.08x** |
+| SH002 | 12103 ms | 7730 ms | 1.57x |
+| SH003 | 22689 ms | 12776 ms | **1.78x** |
+
+**Downgrading a cheap shot buys almost nothing.** SH001 gains 8% because
+Blender's fixed startup dominates it — the direct consequence of §12's
+`startup + k·samples` cost model. Any assumed constant would have been wrong in
+both directions at once: too optimistic for cheap shots, too pessimistic for
+expensive ones.
+
+This makes the case for measurement rather than assumption concrete. A scheduler
+told "proxy is 40% faster" would confidently downgrade SH001 and recover half a
+second. The forecaster now prices each tier from observation, so the agent can
+tell the difference between a downgrade worth taking and one that is theatre.
+
+Note the `final` figures drift from §12's (5147 / 7341 / 26815 ms) because the
+two-tier spike renders both passes in one session under CPU contention, and the
+rate window mixes both. This is the across-run variance §12 already flagged, and
+it is the reason the §6 ablation must repeat whole runs rather than trust one.
+
+---
+
 _Living doc. Update the same day a decision changes._
