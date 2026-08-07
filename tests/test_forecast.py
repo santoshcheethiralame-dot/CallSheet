@@ -113,6 +113,27 @@ def test_shots_are_forecast_sequentially_because_the_farm_is_one_queue():
     assert second.finishes_at_epoch_s == NOW + 12
 
 
+def test_a_finished_shot_does_not_queue_behind_unfinished_work():
+    """A shot with nothing left to render is done, whatever is ahead of it.
+
+    Charging it the wait in front made a completed shot report a deadline miss,
+    which is how the board came to show `in_the_can 3/3` on a card and a
+    shortfall for the same shot on the call sheet beside it.
+    """
+    shots = [_shot("SH001", frames=3), _shot("SH003", frames=3)]
+    state = FarmState(mean_frame_ms={("SH001", "final"): 60_000.0,
+                                     ("SH003", "final"): 60_000.0},
+                      frames_done={"SH003": 3})
+    review = Review("R", NOW + 10, ["SH001", "SH003"])
+
+    behind, finished = forecast_all(shots, review, state, now_epoch_s=NOW)
+
+    assert behind.misses_deadline is True, "SH001 really is 180s of work"
+    assert finished.frames_remaining == 0
+    assert finished.finishes_at_epoch_s == NOW
+    assert finished.misses_deadline is False
+
+
 def test_queue_order_changes_who_misses():
     """Order is load-bearing: whichever shot is queued second absorbs the wait."""
     slow = _shot("SH001", frames=1)

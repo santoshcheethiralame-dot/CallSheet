@@ -78,7 +78,13 @@ def forecast_all(
         predicted = remaining * per_frame
 
         cursor_ms += predicted
-        finishes_at = now_epoch_s + math.ceil(cursor_ms / 1000)
+        # A shot with nothing left to render is already finished; it does not
+        # queue behind anything. Charging it the accumulated wait of the shots
+        # ahead is what let the board call a shot complete and late at the same
+        # time — 3/3 on its card, and short by the wait in front of it on the
+        # call sheet beside it.
+        finishes_at = (now_epoch_s if remaining == 0
+                       else now_epoch_s + math.ceil(cursor_ms / 1000))
 
         required = shot.id in review.required_shots
         forecasts.append(
