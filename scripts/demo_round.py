@@ -1,8 +1,12 @@
-"""Phase 2 gate: observe the real farm, forecast a miss, let Gemini decide, annotate.
+"""Phase 3 gate: observe the real farm, forecast a miss, decide, then check the decision.
 
 Run:
     python scripts/demo_round.py
-Exit 0 means the full loop worked against live Grafana and live Gemini.
+
+Exit 0 means the loop ran against live Grafana and live Gemini *and reported the
+truth about the outcome*. It does not mean the deadline was saved. A gap the
+plan cannot close is a correct result here; the same gap printed as success is
+the bug this phase exists to remove.
 """
 
 from __future__ import annotations
@@ -59,8 +63,32 @@ def main() -> int:
     print(f"\nCALL SHEET: {result.decision.summary}")
     for action in result.decision.actions:
         print(f"  {action.action.upper():10} {action.shot_id} — {action.reason}")
+
+    # A guard that fires silently teaches a viewer nothing. Rejected actions are
+    # printed because "the model proposed this and the code refused it" is the
+    # part of the design that is otherwise invisible.
+    for action, why in result.guard_rejections:
+        print(f"  REJECTED   {action.shot_id} — {why}")
+
+    print("\nAfter applying the plan:")
+    for residual in result.residuals:
+        if residual.closed:
+            print(f"  CLOSED  {residual.shot_id} makes the review")
+        else:
+            print(f"  STILL SHORT  {residual.shot_id} by {residual.shortfall_s}s")
+
     print(f"\nannotation written: {result.annotation_written}")
-    print("\nPASS: observe -> forecast -> decide -> annotate completed end to end.")
+
+    # Both branches are exit 0. The system's job here is to tell the truth about
+    # the outcome, not to guarantee a good one.
+    closed = all(residual.closed for residual in result.residuals)
+    if closed:
+        print("\nPASS: the plan closes the deadline gap.")
+    else:
+        short = ", ".join(
+            f"{r.shot_id} by {r.shortfall_s}s" for r in result.residuals if not r.closed
+        )
+        print(f"\nPASS: loop completed and reported honestly — gap NOT closed ({short}).")
     return 0
 
 
