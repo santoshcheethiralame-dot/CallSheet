@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "callsheet",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "uvicorn", "callsheet.server:app", "--port", "8420"],
+      "port": 8420
+    }
+  ]
+}

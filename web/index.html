@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CALLSHEET — Director review</title>
+<style>
+/* ---------------------------------------------------------------------------
+   CALLSHEET
+
+   The page is a call sheet being amended in real time.
+
+   Film call sheets are reissued on coloured paper as they are revised: white,
+   then blue, then pink, then goldenrod. Every crew member knows that holding
+   goldenrod means the day has gone badly. Each agent decision issues a new
+   revision and advances the stock. That is the one loud thing here; everything
+   else stays quiet.
+   --------------------------------------------------------------------------- */
+
+:root {
+  --suite-black: #14171A;   /* the room: a monitor at 2am */
+  --suite-panel: #1C2126;
+  --suite-line:  #2A3138;
+  --stock-white: #EDE9DE;   /* revision 0 — the paper */
+  --stock-blue:  #8FB8D6;   /* revision 1 */
+  --stock-pink:  #E39BAE;   /* revision 2 */
+  --stock-gold:  #D9A441;   /* revision 3+, and the at-risk colour */
+  --grease:      #B33A2B;   /* grease pencil: struck, missing */
+  --in-the-can:  #6E9E7B;
+  --ink:         #0E1113;
+  --ink-soft:    #6B7379;
+
+  --display: "Bahnschrift", "Archivo Narrow", "Haettenschweiler", Impact, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", Consolas, "SF Mono", monospace;
+  --body: system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  --gap: 20px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--suite-black);
+  color: var(--stock-white);
+  font-family: var(--body);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--stock-gold);
+  outline-offset: 3px;
+}
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  margin: 0 0 14px;
+  font-weight: 400;
+}
+
+/* --- slate header ---------------------------------------------------------- */
+
+.slate {
+  display: flex;
+  align-items: baseline;
+  gap: 28px;
+  flex-wrap: wrap;
+  padding: 18px 28px;
+  border-bottom: 1px solid var(--suite-line);
+  background: linear-gradient(180deg, #191D21, var(--suite-black));
+}
+
+.slate__mark {
+  font-family: var(--display);
+  font-size: 30px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.slate__review {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.slate__rev {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  color: var(--ink);
+  background: var(--stock-white);
+}
+
+.slate__clock {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 26px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+
+.slate__clock[data-late="true"] { color: var(--grease); }
+
+/* --- layout ---------------------------------------------------------------- */
+
+main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 32px;
+  padding: 26px 28px 40px;
+  align-items: start;
+}
+
+/* --- shot cards ------------------------------------------------------------ */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: var(--gap);
+}
+
+.card {
+  position: relative;
+  background: var(--suite-panel);
+  border: 1px solid var(--suite-line);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.card[data-state="at_risk"] { border-color: var(--stock-gold); }
+.card[data-state="in_the_can"] { border-color: #24312A; }
+.card[data-state="struck"] { opacity: 0.55; }
+
+.card__frame {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  background: #0B0D0F;
+}
+
+.card__frame--empty {
+  display: grid;
+  place-items: center;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: #39424A;
+}
+
+.card__body { padding: 12px 14px 14px; }
+
+.card__id {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 14px;
+  letter-spacing: 0.06em;
+}
+
+.card__quality {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+/* One segment per frame: a coordinator counts frames, not percentages. */
+.card__frames {
+  display: flex;
+  gap: 3px;
+  margin: 11px 0 9px;
+}
+
+.card__seg {
+  height: 4px;
+  flex: 1;
+  background: #2E353C;
+}
+
+.card__seg[data-done="true"] { background: var(--in-the-can); }
+.card[data-state="at_risk"] .card__seg[data-done="true"] { background: var(--stock-gold); }
+
+.card__eta {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
+.card[data-state="at_risk"] .card__eta { color: var(--stock-gold); }
+.card[data-state="in_the_can"] .card__eta { color: var(--in-the-can); }
+
+.card__strike {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.card__strike path {
+  stroke: var(--grease);
+  stroke-width: 5;
+  stroke-linecap: round;
+  fill: none;
+  opacity: 0.85;
+  stroke-dasharray: 420;
+  stroke-dashoffset: 420;
+  animation: strike 420ms ease-out forwards;
+}
+
+@keyframes strike { to { stroke-dashoffset: 0; } }
+
+/* --- the paper ------------------------------------------------------------- */
+
+.rail { display: grid; gap: var(--gap); }
+
+.paper {
+  position: relative;
+  background: var(--stock-white);
+  color: var(--ink);
+  padding: 22px 22px 20px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+}
+
+.paper[data-stock="blue"] { background: var(--stock-blue); }
+.paper[data-stock="pink"] { background: var(--stock-pink); }
+.paper[data-stock="goldenrod"] { background: var(--stock-gold); }
+
+.paper__stamp {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  transform: rotate(-7deg);
+  border: 2px solid rgba(14, 17, 19, 0.55);
+  color: rgba(14, 17, 19, 0.7);
+  font-family: var(--mono);
+  font-size: 9px;
+  line-height: 1.25;
+  letter-spacing: 0.12em;
+  text-align: center;
+  text-transform: uppercase;
+  padding: 5px 8px;
+}
+
+.paper__title {
+  font-family: var(--display);
+  font-size: 19px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin: 0 0 3px;
+  max-width: 60%;
+}
+
+.paper__rule {
+  border: 0;
+  border-top: 1px solid rgba(14, 17, 19, 0.28);
+  margin: 14px 0 13px;
+}
+
+.paper__summary { margin: 0; font-size: 14px; }
+
+.paper__action {
+  display: flex;
+  gap: 10px;
+  font-family: var(--mono);
+  font-size: 12px;
+  margin-top: 9px;
+}
+
+.paper__verb {
+  min-width: 74px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.paper__reason { color: rgba(14, 17, 19, 0.72); }
+
+.paper__action--rejected .paper__verb,
+.paper__action--rejected .paper__reason {
+  color: rgba(14, 17, 19, 0.45);
+  text-decoration: line-through;
+}
+
+.paper__gap {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 2px solid var(--grease);
+  color: var(--grease);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+.paper__gap strong {
+  display: block;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 11px;
+  margin-bottom: 3px;
+}
+
+/* --- event feed ------------------------------------------------------------ */
+
+.feed { border-top: 1px solid var(--suite-line); padding-top: 16px; }
+
+.feed__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 7px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.feed__item {
+  display: flex;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.feed__time {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-soft);
+  flex: none;
+  padding-top: 2px;
+}
+
+.feed__empty { color: var(--ink-soft); font-size: 13px; margin: 0; }
+
+/* --- degraded banner ------------------------------------------------------- */
+
+.degraded {
+  display: none;
+  margin: 0 28px;
+  padding: 9px 14px;
+  border-left: 3px solid var(--stock-gold);
+  background: rgba(217, 164, 65, 0.08);
+  font-size: 13px;
+}
+
+.degraded[data-show="true"] { display: block; }
+
+@media (max-width: 900px) {
+  main { grid-template-columns: minmax(0, 1fr); }
+  .slate__clock { margin-left: 0; }
+}
+
+@media (max-width: 420px) {
+  main { padding: 18px 16px 32px; }
+  .degraded { margin: 0 16px; }
+
+  /* The slate stacked four deep and took a quarter of the screen. Pair the
+     identity with the clock, and the review with its revision chip. */
+  .slate {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 6px 12px;
+    align-items: center;
+    padding: 12px 16px;
+  }
+  .slate__mark { font-size: 21px; }
+  .slate__clock { font-size: 20px; margin-left: 0; text-align: right; }
+  .slate__review { grid-column: 1; font-size: 11px; }
+  .slate__rev { grid-column: 2; justify-self: end; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card__strike path { animation: none; stroke-dashoffset: 0; }
+  * { transition: none !important; }
+}
+</style>
+</head>
+<body>
+
+<header class="slate">
+  <div class="slate__mark">Callsheet</div>
+  <div class="slate__review" id="review">&mdash;</div>
+  <div class="slate__rev" id="rev">Rev 0 &middot; White</div>
+  <div class="slate__clock" id="clock">--:--</div>
+</header>
+
+<p class="degraded" id="degraded"></p>
+
+<main>
+  <section>
+    <h2 class="eyebrow">Shot board</h2>
+    <div class="grid" id="cards"></div>
+  </section>
+
+  <aside class="rail">
+    <article class="paper" id="paper" data-stock="white">
+      <div class="paper__stamp" id="stamp">Revision 0<br>White</div>
+      <h2 class="paper__title">Call sheet</h2>
+      <hr class="paper__rule">
+      <p class="paper__summary" id="summary">Waiting for the first scheduling round.</p>
+      <div id="actions"></div>
+      <div class="paper__gap" id="gap" hidden></div>
+    </article>
+
+    <section class="feed">
+      <h2 class="eyebrow">Event feed</h2>
+      <ul class="feed__list" id="feed"></ul>
+      <p class="feed__empty" id="feedEmpty">Nothing yet tonight.</p>
+    </section>
+  </aside>
+</main>
+
+<script>
+const STOCK_NAME = { white: "White", blue: "Blue", pink: "Pink", goldenrod: "Goldenrod" };
+
+// A grease-pencil stroke, drawn slightly off-true so it reads as a hand.
+const STRIKE = '<svg class="card__strike" viewBox="0 0 210 150" preserveAspectRatio="none" aria-hidden="true">' +
+               '<path d="M8 138 C 60 96, 96 74, 202 12"/></svg>';
+
+let deadline = 0;
+
+function pad(n) { return String(n).padStart(2, "0"); }
+
+function timecode(epochSeconds) {
+  const d = new Date(epochSeconds * 1000);
+  return pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
+}
+
+function tickClock() {
+  const el = document.getElementById("clock");
+  if (!deadline) { el.textContent = "--:--"; el.dataset.late = "false"; return; }
+  const left = deadline - Math.floor(Date.now() / 1000);
+  const sign = left < 0 ? "+" : "-";
+  const abs = Math.abs(left);
+  el.textContent = "T" + sign + pad(Math.floor(abs / 60)) + ":" + pad(abs % 60);
+  el.dataset.late = String(left < 0);
+}
+
+// The card never computes a shortfall. That number is arithmetic, it already
+// exists in `residuals`, and deriving it a second time here is how the two
+// surfaces start disagreeing. The card states the situation; the call sheet
+// states the number.
+function etaLabel(card) {
+  if (card.state === "struck") return "Struck from tonight's queue";
+  if (card.state === "in_the_can") return "In the can";
+  if (card.state === "at_risk") return "Will miss the review";
+  if (card.eta_s === null || card.eta_s === undefined) return "Not started";
+  return "Ready in " + card.eta_s + "s";
+}
+
+function renderCards(cards) {
+  const host = document.getElementById("cards");
+  host.innerHTML = cards.map(card => {
+    const face = card.thumbnail
+      ? '<img class="card__frame" src="' + card.thumbnail + '" alt="Latest rendered frame of ' + card.shot_id + '">'
+      : '<div class="card__frame card__frame--empty">No frame yet</div>';
+
+    const segments = Array.from({ length: card.frames_total }, (_, i) =>
+      '<span class="card__seg" data-done="' + (i < card.frames_done) + '"></span>').join("");
+
+    return '<article class="card" data-state="' + card.state + '" tabindex="0">' +
+      (card.state === "struck" ? STRIKE : "") + face +
+      '<div class="card__body">' +
+        '<div class="card__id"><span>' + card.shot_id + '</span>' +
+        '<span class="card__quality">' + card.quality + '</span></div>' +
+        '<div class="card__frames">' + segments + '</div>' +
+        '<div class="card__eta">' + etaLabel(card) + '</div>' +
+      '</div></article>';
+  }).join("");
+}
+
+function renderPaper(state) {
+  const stock = state.stock || "white";
+  document.getElementById("paper").dataset.stock = stock;
+  document.getElementById("stamp").innerHTML =
+    "Revision " + state.revision + "<br>" + (STOCK_NAME[stock] || stock);
+  document.getElementById("rev").textContent =
+    "Rev " + state.revision + " · " + (STOCK_NAME[stock] || stock);
+  document.getElementById("summary").textContent =
+    state.summary || "Waiting for the first scheduling round.";
+
+  const taken = (state.actions || []).map(a =>
+    '<div class="paper__action"><span class="paper__verb">' + a.action + '</span>' +
+    '<span class="paper__reason">' + a.shot_id + " &mdash; " + a.reason + '</span></div>').join("");
+
+  const refused = (state.rejections || []).map(r =>
+    '<div class="paper__action paper__action--rejected">' +
+    '<span class="paper__verb">' + r.action.action + '</span>' +
+    '<span class="paper__reason">' + r.action.shot_id + " &mdash; " + r.reason + '</span></div>').join("");
+
+  document.getElementById("actions").innerHTML = taken + refused;
+
+  const open = (state.residuals || []).filter(r => !r.closed);
+  const gap = document.getElementById("gap");
+  gap.hidden = open.length === 0;
+  if (open.length) {
+    gap.innerHTML = "<strong>Gap not closed</strong>" + open.map(r =>
+      r.shot_id + " still short by " + r.shortfall_s + "s").join("<br>");
+  }
+}
+
+function renderFeed(events) {
+  const list = document.getElementById("feed");
+  const empty = document.getElementById("feedEmpty");
+  empty.hidden = events.length > 0;
+  list.innerHTML = events.slice().reverse().slice(0, 40).map(e =>
+    '<li class="feed__item"><span class="feed__time">' + timecode(e.at_epoch_s) + '</span>' +
+    '<span>' + e.text + '</span></li>').join("");
+}
+
+function apply(state) {
+  deadline = state.deadline_epoch_s || 0;
+  document.getElementById("review").textContent =
+    state.review_name + (deadline ? " · " + timecode(deadline) : "");
+
+  const banner = document.getElementById("degraded");
+  banner.dataset.show = String(Boolean(state.degraded_reason));
+  if (state.degraded_reason) {
+    banner.textContent = "Scheduling by priority — the model is unavailable. " + state.degraded_reason;
+  }
+
+  renderCards(state.cards || []);
+  renderPaper(state);
+  renderFeed(state.events || []);
+  tickClock();
+}
+
+fetch("/api/state").then(r => r.json()).then(apply).catch(() => {});
+
+const stream = new EventSource("/api/stream");
+stream.onmessage = event => {
+  try { apply(JSON.parse(event.data)); } catch (e) { /* keep the last good board */ }
+};
+
+setInterval(tickClock, 1000);
+</script>
+</body>
+</html>
