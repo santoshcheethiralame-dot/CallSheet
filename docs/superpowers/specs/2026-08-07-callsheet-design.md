@@ -616,4 +616,28 @@ failure where the model had answered perfectly well.
 
 ---
 
+## Shipping
+
+**Repository:** https://github.com/santoshcheethiralame-dot/CallSheet — public,
+default branch `main`, Apache-2.0 already detected by GitHub, which satisfies the
+"license visible in the About section" eligibility requirement.
+
+**State at the time of writing:** the remote holds exactly one commit, GitHub's
+own `Initial commit`, containing only a `LICENSE` byte-identical to ours bar a
+line ending. Local is 61 commits, 58 tracked files, `.env` untracked and never
+staged; a scan of the full history for the live `glsa_`, `glc_` and `AQ.` tokens
+returns nothing.
+
+**The push is therefore a force-push of unrelated histories** — the alternative,
+`--allow-unrelated-histories`, would graft a merge commit onto a clean history to
+preserve a file we already have. Nothing is lost. The remote is wired up and the
+local branch renamed to `main`; only the push itself is outstanding, and it waits
+for an explicit go.
+
+**Before it goes out**, run the `preflight` skill: README quality, secrets scan,
+license check. The repo becomes permanently public and indexed the moment it is
+pushed, so the audit belongs before rather than after.
+
+---
+
 _Living doc. Update the same day a decision changes._
