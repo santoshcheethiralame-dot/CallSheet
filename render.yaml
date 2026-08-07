@@ -1,0 +1,31 @@
+# One-click deploy of the board. Render reads this from the repo root.
+#
+# Secrets are declared but not valued: `sync: false` means Render prompts for
+# them once in the dashboard and never stores them in this file. A committed
+# credential in a public repo is the one deployment mistake that cannot be
+# taken back.
+services:
+  - type: web
+    name: callsheet
+    runtime: docker
+    plan: free
+    # Singapore is the closest free region to the Grafana stack, which lives in
+    # prod-ap-south-1. Every round makes a round trip to it.
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    # /api/state serves with or without credentials, so a health check passing
+    # means the surface is up - not that the night is running.
+    healthCheckPath: /api/state
+    envVars:
+      - key: GRAFANA_URL
+        sync: false
+      - key: GRAFANA_SERVICE_ACCOUNT_TOKEN
+        sync: false
+      - key: OTLP_ENDPOINT
+        sync: false
+      - key: OTLP_AUTH
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: CALLSHEET_DB
+        value: /tmp/callsheet.db
