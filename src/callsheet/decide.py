@@ -7,6 +7,7 @@ It is never asked to work out a duration, an ETA, or whether a shot misses.
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 
 from google import genai
@@ -18,6 +19,13 @@ from callsheet.forecast import FALLBACK, Forecast
 
 MODEL = "gemini-3.6-flash"
 VALID_ACTIONS = {"preempt", "downgrade", "escalate"}
+
+MAX_ATTEMPTS = 3
+BACKOFF_BASE_S = 0.5
+"""Waits of 0.5s then 1.0s — 1.5s of stalling in the worst case. Long enough to
+outlive a capacity blip, short enough that nobody watching the demo notices."""
+
+TRANSIENT_MARKERS = ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "OVERLOADED")
 
 SYSTEM = """You are the production coordinator for a VFX render farm.
 
@@ -110,16 +118,46 @@ def parse_decision(raw: str) -> Decision:
     return Decision(summary=payload["summary"], actions=actions)
 
 
+def _is_transient(error: Exception) -> bool:
+    """Is this worth trying again, or is retrying just burning quota?
+
+    Capacity and rate limits pass. A malformed reply does not: a model that
+    returned nonsense will return nonsense again, and `parse_decision` raises
+    `ValueError` for exactly that. Nor does an auth failure — a bad key stays bad.
+    """
+    if isinstance(error, (ValueError, KeyError, TypeError)):
+        return False
+    haystack = f"{getattr(error, 'code', '')} {error}".upper()
+    return any(marker in haystack for marker in TRANSIENT_MARKERS)
+
+
 def decide(config: Config, shots: list[Shot], review: Review,
            forecasts: list[Forecast]) -> Decision:
+    """Ask the model for a call sheet, retrying only a busy upstream.
+
+    Gemini answered `503 UNAVAILABLE ... high demand` four times in one session.
+    `run_round` degrades correctly on that, but a degrade during a recorded demo
+    means the product never appears on screen. The final failure is still raised,
+    so a genuine outage still reaches the degrade path instead of being masked.
+    """
     client = genai.Client(api_key=config.gemini_api_key)
-    response = client.models.generate_content(
-        model=MODEL,
-        contents=build_prompt(shots, review, forecasts),
-        config=types.GenerateContentConfig(
-            system_instruction=SYSTEM,
-            response_mime_type="application/json",
-            temperature=0.2,
-        ),
-    )
-    return parse_decision(response.text)
+    prompt = build_prompt(shots, review, forecasts)
+
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            response = client.models.generate_content(
+                model=MODEL,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM,
+                    response_mime_type="application/json",
+                    temperature=0.2,
+                ),
+            )
+            return parse_decision(response.text)
+        except Exception as error:      # noqa: BLE001 — re-raised unless transient
+            if attempt == MAX_ATTEMPTS or not _is_transient(error):
+                raise
+            time.sleep(BACKOFF_BASE_S * 2 ** (attempt - 1))
+
+    raise AssertionError("unreachable: the loop returns or raises")
