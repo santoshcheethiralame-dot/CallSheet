@@ -3,9 +3,16 @@ import json
 from fastapi.testclient import TestClient
 
 from callsheet import server
+from callsheet.config import ConfigError
+from callsheet.decide import Action, Decision
+from callsheet.domain import Review, Shot
+from callsheet.round import RoundResult
 from callsheet.server import app
+from callsheet.session import Session
 
 client = TestClient(app)
+"""Constructed outside a `with` block on purpose: that is what keeps the app's
+lifespan — and therefore the live round — from starting for these tests."""
 
 
 def test_the_page_is_served():
@@ -59,6 +66,57 @@ def test_an_absolute_path_is_refused(tmp_path, monkeypatch):
     """`Path(out) / "C:/..."` discards the left-hand side entirely."""
     monkeypatch.setattr(server, "OUT_DIR", tmp_path)
     assert client.get("/frames/C:%5CWindows%5Cwin.ini").status_code in (400, 404)
+
+
+def test_the_server_starts_and_serves_with_no_credentials(monkeypatch):
+    """The path a judge cloning the repo is on. No .env, no Grafana, no key —
+    and the surface must still come up rather than 500 on the first request.
+
+    Forced rather than observed: this machine has a populated .env, so a test
+    that merely started the app would prove the opposite of what it claims.
+    """
+    def no_credentials() -> None:
+        raise ConfigError("Missing required environment variables: GEMINI_API_KEY")
+
+    monkeypatch.setattr(server, "load_config", no_credentials)
+    monkeypatch.setattr(server, "_session", None)
+
+    with TestClient(app) as bare:
+        response = bare.get("/api/state")
+
+    assert response.status_code == 200
+    assert response.json()["revision"] == 0
+    assert server._session is None, "no credentials must mean no live round"
+
+
+def test_the_board_comes_from_the_live_round_once_one_has_run(monkeypatch):
+    session = Session()
+    session.record(
+        RoundResult([], Decision("Striking SH002", [Action("SH002", "preempt", "cut")]),
+                    True),
+        [Shot("SH002", "b.blend", 64, [1, 2, 3])],
+        Review("Director review", 1_000_030, ["SH001"]),
+        frames_done={}, now_epoch_s=1_000_000,
+    )
+    monkeypatch.setattr(server, "_session", session)
+
+    body = client.get("/api/state").json()
+
+    assert body["revision"] == 1
+    assert body["stock"] == "blue"
+    assert body["summary"] == "Striking SH002"
+
+
+def test_a_degraded_round_reaches_the_page(monkeypatch):
+    """The page reads `degraded_reason` to raise its banner. If the field never
+    arrives the board reports a model outage as a quiet, healthy night."""
+    session = Session()
+    session.record(RoundResult([], None, False, degraded_reason="503 UNAVAILABLE"),
+                   [], Review("Director review", 1_000_030, []),
+                   frames_done={}, now_epoch_s=1_000_000)
+    monkeypatch.setattr(server, "_session", session)
+
+    assert client.get("/api/state").json()["degraded_reason"] == "503 UNAVAILABLE"
 
 
 def test_the_stream_event_carries_the_whole_board():

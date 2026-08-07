@@ -1,21 +1,35 @@
 """The production surface: one page, the board state, and the real frames.
 
 Every route here is a view. Nothing in this file decides anything about the
-schedule — it reads what the engine produced and hands it to the page.
+schedule — it reads what the engine produced and hands it to the page. The one
+thing it owns is the *timer*: a background task that runs a scheduling round,
+folds it into the session, and lets the routes serve the result.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import dataclasses
 import json
+import logging
+import os
+import time
+from collections.abc import AsyncIterator
 from pathlib import Path
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 
 from callsheet.board import BoardState, build_board
-from callsheet.domain import Review, load_review, load_shots
+from callsheet.config import Config
+from callsheet.domain import Review, Shot, load_review, load_shots
+from callsheet.round import RoundResult, run_round
+from callsheet.session import Session
+
+log = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT_DIR = ROOT / "out"
@@ -30,27 +44,116 @@ page is not built yet."""
 
 TICK_S = 1.0
 
-app = FastAPI(title="CALLSHEET")
+ROUND_INTERVAL_S = 30.0
+"""One scheduling round every 30s — the timer of record from §5.3."""
+
+DEADLINE_S = 30
+"""How far out the next review sits, applied to the clock each round.
+
+`review.json` carries `deadline_epoch_s = 0` as a sentinel because a committed
+absolute deadline is in the past by the next morning. `demo_round.py` applies
+the clock the same way; doing it per round rather than once at startup keeps the
+board showing the next review rather than an ever-deepening overdue."""
+
+_session: Session | None = None
+"""The running night, or `None` when no live round is driving the board."""
+
+
+def load_config() -> Config:
+    """Credentials for the live round. Raises when they are absent.
+
+    A named function so the no-credentials path is testable without unsetting
+    environment variables underneath a process that may have a `.env`."""
+    load_dotenv()
+    return Config.from_env(os.environ)
+
+
+def frames_on_disk(shots: list[Shot]) -> dict[str, int]:
+    """What the farm has actually written — the only real pixels on the page."""
+    if not OUT_DIR.is_dir():
+        return {}
+    return {shot.id: len(list(OUT_DIR.glob(f"{shot.id}_*.png"))) for shot in shots}
+
+
+async def run_rounds(config: Config, session: Session, shots: list[Shot],
+                     review: Review) -> None:
+    """The timer. It must outlive anything that goes wrong inside it.
+
+    A round that raises — Grafana unreachable, the model out, a bad payload —
+    ends this task if it escapes, and the board silently freezes on its last
+    good state while continuing to look live. So the failure is caught, recorded
+    as a degrade, and the timer keeps its next appointment.
+    """
+    while True:
+        now = int(time.time())
+        tonight = dataclasses.replace(review, deadline_epoch_s=now + DEADLINE_S)
+        try:
+            result = await run_round(config, shots, tonight, now_epoch_s=now)
+        except Exception as error:      # noqa: BLE001 — the loop degrades, never dies
+            log.warning("round failed: %s", error)
+            result = RoundResult([], None, False, degraded_reason=str(error))
+
+        session.record(result, shots, tonight,
+                       frames_done=frames_on_disk(shots), now_epoch_s=now)
+        await asyncio.sleep(ROUND_INTERVAL_S)
+
+
+def start_rounds() -> asyncio.Task | None:
+    """Begin the live round, or don't — and serve either way.
+
+    No credentials is a normal way to run this: a judge cloning the repo has no
+    Grafana token and must still get the page. So a config failure is not an
+    error here, it is the absence of a live round; `current_board` falls back to
+    what is on disk and the surface stays up.
+    """
+    global _session
+    try:
+        config = load_config()
+        shots = load_shots(str(MANIFEST))
+        review = load_review(str(REVIEW))
+    except Exception as error:          # noqa: BLE001 — serving matters more
+        log.info("no live round: %s", error)
+        return None
+
+    _session = Session()
+    return asyncio.create_task(run_rounds(config, _session, shots, review))
+
+
+@contextlib.asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    task = start_rounds()
+    try:
+        yield
+    finally:
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+
+app = FastAPI(title="CALLSHEET", lifespan=lifespan)
 
 
 def current_board() -> BoardState:
     """The board as it stands right now.
 
-    Until a live round drives it, this reports only what is on disk: the shot
-    manifest, the review, and the frames that have actually been rendered. No
-    forecasts, because a forecast needs telemetry and this must serve with no
-    credentials present. Every field is therefore either measured or absent —
-    the page never receives an invented number.
+    Once a round has run, this is the session's board — a real forecast, a real
+    decision, and the revision the night has reached. Before that it reports
+    only what is on disk: the shot manifest, the review, and the frames that
+    have actually been rendered. No forecasts on that path, because a forecast
+    needs telemetry and this must serve with no credentials present. Every field
+    is therefore either measured or absent — the page never receives an invented
+    number.
     """
+    if _session is not None and _session.board is not None:
+        return _session.board
+
     shots = load_shots(str(MANIFEST)) if MANIFEST.exists() else []
     review = (load_review(str(REVIEW)) if REVIEW.exists()
               else Review("No review scheduled", 0, []))
-    frames_done = {
-        shot.id: len(list(OUT_DIR.glob(f"{shot.id}_*.png"))) for shot in shots
-    } if OUT_DIR.is_dir() else {}
 
     return build_board(shots, review, [], now_epoch_s=review.deadline_epoch_s,
-                       frames_done=frames_done)
+                       frames_done=frames_on_disk(shots))
 
 
 @app.get("/", response_class=HTMLResponse)

@@ -536,10 +536,13 @@ function apply(state) {
 
 fetch("/api/state").then(r => r.json()).then(apply).catch(() => {});
 
+// `addEventListener("state")`, not `onmessage`: the stream names its events, and
+// a named event never reaches `onmessage`. With that handler the page fetched
+// once and then sat there looking live while every update went to the floor.
 const stream = new EventSource("/api/stream");
-stream.onmessage = event => {
+stream.addEventListener("state", event => {
   try { apply(JSON.parse(event.data)); } catch (e) { /* keep the last good board */ }
-};
+});
 
 setInterval(tickClock, 1000);
 </script>
