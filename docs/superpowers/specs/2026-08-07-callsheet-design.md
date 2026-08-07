@@ -37,7 +37,7 @@ coordinator, and nobody builds it.
 | Constraint | Resolution |
 |---|---|
 | $0 total cost, no credit card | Grafana Cloud free plan (permanent, no card): 10k series, 50 GB logs, 50 GB traces, 3 users, 14-day retention. Gemini via AI Studio free tier (permanent, no card). Blender, OTel, FastAPI, SQLite all free. |
-| Gemini free-tier quota | **3.6 Flash: ~15 RPM / 1500 RPD.** 2.5 Flash and 2.5 Flash-Lite return 404 "no longer available to new users" — the model this spec originally named cannot be called at all. Architecture still keeps the LLM to a handful of calls per scheduling round, not one per metric. |
+| Gemini free-tier quota | **20 requests per day, per model.** Measured against this key, not read off a blog: `GenerateRequestsPerDayPerProjectPerModel-FreeTier, limit: 20`. An earlier draft of this table said ~1500 RPD from a secondary source; that figure is wrong and nearly cost the demo. 2.5 Flash and 2.5 Flash-Lite additionally return 404 "no longer available to new users". **A 30s round timer that calls the model on every forecast miss exhausts the day in ten minutes** — see §16 for the rule that makes this survivable. |
 | Partner requirement | Grafana MCP server (`mcp-grafana`) connected and called at runtime. AI Observability added as a complement, which the rules note does not satisfy the requirement alone. |
 | Google Cloud requirement | `google-adk` + `google-genai` imported and called; Cloud Run hosts the board. |
 | New work only | Fresh repo, no reuse from Forge / Chronos / Hemlock / Untangle. |
@@ -544,6 +544,74 @@ produces any more.
 the process, so `fresh_night.py` cannot reach a running server's copy of it. The
 script says so and the demo order is: stop the server, clear the night, start
 the server.
+
+**The free tier is 20 model calls per day, not the ~1500 §3 used to claim.**
+Read off the live key rather than a blog:
+`GenerateRequestsPerDayPerProjectPerModel-FreeTier, limit: 20`. Against a 30s
+round timer that calls `decide` on every forecast miss — and a fresh night
+misses on *every* round — that is twenty rounds, ten minutes, and then a 429 on
+camera. The architecture was already right that a healthy farm costs zero calls;
+it was wrong that an unhealthy one costs one per round.
+
+**The rule: ask when the question changes, not when the timer fires.** A
+*situation key* — which required shots are missing, and each one's shortfall
+bucketed to 10s — is computed before the model is called. Matching the last
+key, the previous `Decision` is reused and `decide` is never entered. Three
+things follow from where it lives:
+
+- **It is the session's, not the round's.** `run_round` is one round and
+  remembers nothing; the session is the thing with memory. The round takes a
+  `reuse` callable the same way it takes `frames_done` — anything spanning
+  rounds is held by the caller.
+- **It sits in front of `amendment`, which was doing this job too late.**
+  `amendment` compares two decisions *after* the call and stops the paper being
+  reissued; it cannot stop the quota being spent. The two now stack: the key
+  keeps an unchanged night from asking, and `amendment` still catches a changed
+  situation that came back with the same plan.
+- **Reuse re-runs the guard and the verifier, and does not re-annotate.** Those
+  are arithmetic against a moving clock and their answers change; the annotation
+  records a moment that has already been written, and re-posting it every 30s
+  would put forty copies of one decision on the Grafana timeline.
+
+Bucket size is 10s because the raw shortfall never repeats exactly — the
+forecast rounds up and telemetry means drift every frame — while a frame here is
+8-60s, so anything that would change the plan moves a shortfall clear across a
+bucket and jitter does not. The boundary artefact (19s -> 20s re-asks over one
+second) fails in the cheap direction: it costs one call, where the other
+direction reuses a stale plan.
+
+**The bound this buys, derived rather than guessed.** Because the deadline is
+re-based to `now + 30` every round, a shortfall is `ceil(cursor_ms/1000) - 30`
+and carries no `now` in it — it is *exactly* invariant between rounds unless the
+forecast's inputs move. Those inputs are `frames_done` and `mean_frame_ms`, and
+both change only when a frame finishes. So the key can change at most once per
+frame completion, and:
+
+| | 10-minute demo, fresh night |
+|---|---|
+| Before | 20 rounds, 20 calls — the whole day |
+| After, worst case | 1 + one per frame completed; the manifest is 9 frames, so **10** |
+| After, as the demo is actually run | **1** — the board schedules and does not render, so nothing completes while it is on screen |
+
+The honest caveat: this is a bound on *distinct situations*, not a hard cap. A
+farm rendering fast enough to finish twenty frames in ten minutes would still
+cost twenty calls, correctly, because it really did present twenty different
+problems. If that ever becomes the shape of the demo, the next lever is a floor
+on the interval between calls, not a coarser bucket.
+
+**Reuse is not a degrade.** `degraded_reason` stays `None` on the reuse path.
+Announcing correct behaviour as a fallback would be the page lying in the
+pessimistic direction, which is still lying.
+
+**And when the quota does run out, the board says so in English.** The page
+prints `degraded_reason` verbatim, so a raw `429 RESOURCE_EXHAUSTED {'quotaId':
+...}` on screen tells an audience the product broke when it has actually fallen
+back to priority order. `decide.degrade_reason` names the two model degrades
+apart — "the daily model quota is spent" lasts until Pacific midnight, "the
+model is unavailable" does not — and the exception itself goes to the log
+untouched. The page's own hardcoded prefix is gone with it: it used to staple
+"the model is unavailable" onto *every* degrade, including a Grafana write
+failure where the model had answered perfectly well.
 
 ---
 
