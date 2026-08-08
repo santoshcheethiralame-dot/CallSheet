@@ -7,7 +7,8 @@ Built for the Google Cloud Agentic Cinema Hackathon, Grafana partner track.
 
 ## Status
 
-Phase 4 — the loop checks its own work, and there is a board to watch it on.
+Phase 5 — the loop checks its own work, there is a board to watch it on, and
+there is a measured result behind the scheduler.
 Real Blender renders report to Grafana
 Cloud over OpenTelemetry; the agent reads their observed frame times back through
 the Grafana MCP server, forecasts which shots miss the review deadline, asks
@@ -111,6 +112,60 @@ measured telemetry or from the 8-second default; a guess must never be able to
 pass itself off as a measurement. The call sheet, any guard-rejected actions and
 the residual shortfall are then written to Grafana as one annotation tagged
 `callsheet`, so the dashboard carries the same caveat the terminal does.
+
+## The scheduler ablation
+
+```
+python -m bench.run
+```
+
+Three scheduling policies over one workload: **FIFO** (manifest order, reacts to
+nothing), **priority-only** (sorted once by static shot priority, still reacts to
+nothing), and **CALLSHEET** (forecast against the deadline from observed
+per-frame costs, then preempt non-required shots ahead of an at-risk required
+shot, or downgrade the at-risk shot itself).
+
+16 shots a night, 6 required by the review, deadline at 1.25x the required
+shots' final-quality work. 200 runs per arm — 5 generated nights x 40 draws of
+render cost. Cells are mean ± stdev with min–max in brackets.
+
+| Scheduler | Required shots delivered | Deadline misses | Node-seconds on cut shots |
+|---|---|---|---|
+| FIFO | 2.65 ± 0.87 (1–5) | 3.35 ± 0.87 (1–5) | 95.0 ± 50.6 |
+| Priority-only | 3.63 ± 1.38 (2–6) | 2.37 ± 1.38 (0–4) | 82.2 ± 57.9 |
+| **CALLSHEET** | **5.96 ± 0.18 (5–6)** | **0.04 ± 0.18 (0–1)** | **11.8 ± 17.6** |
+
+**What it does not measure: the model.** Gemini's free tier is 20 requests per
+day, so a few hundred runs cannot call it and this harness does not — `bench`
+never imports `decide`, and an AST check in the tests enforces that rather than
+a promise in a README. What it measures is the **scheduling policy the agent
+operates within**: the forecaster, the guard, the verifier and the
+preempt/downgrade repertoire, all imported from the package and driven unchanged
+so a regression in the product is a regression in the benchmark. The choice of
+*which* shot to sacrifice is made here by a deterministic rule, and that is the
+easy half of the problem. Weighing two sacrifices that both close the gap but
+cost the production different things is the model's actual job, and nothing here
+evaluates it.
+
+Render costs are not Blender either. They are sampled from the per-shot means
+measured in the design doc, with the 1.5x run-to-run swing and ±3.5% within-run
+spread also measured there. Whole runs are repeated rather than frames, because
+the measurements say the noise lives between process launches. Every arm in a
+given run sees identical sampled costs — including for tiers it did not choose —
+so the arms are compared against the same luck, and a seed reproduces a table
+exactly.
+
+**What the win costs, and where CALLSHEET loses.** It finishes **1.20
+non-required shots against FIFO's 5.93**: the deadline is met by destroying work
+the farm had started, and tomorrow's review may want it. Set every shot required
+and the deadline out of reach (`--required-fraction 1.0 --slack 0.85`) and the
+advantage disappears — **CALLSHEET ties FIFO exactly at 13.03 and loses to
+priority-only's 13.91**, correctly declining to act and escalating 17 times a
+night instead. Priority-only wins there on a lever CALLSHEET does not have:
+reordering the queue. `apply_actions` can preempt and downgrade, not resequence.
+
+Both facts are pinned by tests, and §6 of the design doc carries the full
+methodology, the failure case, and the two other places a hostile reading lands.
 
 ## Test
 

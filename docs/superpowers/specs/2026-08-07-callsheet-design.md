@@ -137,22 +137,129 @@ Implementation.
 
 ## 6. Evaluation
 
-`bench/` replays a fixed workload — deterministic scene costs, injected failures
-— under three schedulers, N runs each:
+`bench/` replays a fixed workload under three schedulers. `python -m bench.run`.
 
-| Scheduler | Shots delivered before deadline | Deadline misses | Node-hours wasted on cut shots |
+| Scheduler | Required shots delivered before deadline | Deadline misses | Node-seconds wasted on cut shots |
 |---|---|---|---|
-| FIFO | | | |
-| Priority-only | | | |
-| CALLSHEET | | | |
+| FIFO | 2.65 ± 0.87 (1–5) | 3.35 ± 0.87 (1–5) | 95.0 ± 50.6 (28.8–214.0) |
+| Priority-only | 3.63 ± 1.38 (2–6) | 2.37 ± 1.38 (0–4) | 82.2 ± 57.9 (0.0–219.4) |
+| **CALLSHEET** | **5.96 ± 0.18 (5–6)** | **0.04 ± 0.18 (0–1)** | **11.8 ± 17.6 (0.0–51.2)** |
 
-_(Cells intentionally empty — this is the results template. Numbers are filled
-in when the harness runs in the Aug 26–31 window.)_
+Out of 6 required shots per night. Mean ± stdev, min–max in brackets, over 200
+runs per arm. Node-**seconds**, not the node-hours the template guessed at: a
+night here is about fifteen minutes of farm time and hours would be three
+leading zeros.
 
-This is the one thing no other entrant on this track is likely to have. It
+**What the win costs.** Reported because a table with only favourable columns is
+an advertisement:
+
+| Scheduler | Required shots delivered at proxy | Non-required shots delivered | Escalations raised |
+|---|---|---|---|
+| FIFO | 0.00 | 5.93 ± 1.37 | 0.00 |
+| Priority-only | 0.00 | 3.12 ± 1.28 | 0.00 |
+| CALLSHEET | 0.05 ± 0.22 | **1.20 ± 0.48** | 0.68 ± 0.56 |
+
+CALLSHEET finishes **1.20 non-required shots against FIFO's 5.93**. That is not
+a rounding error, it is the trade: the deadline is met by destroying work the
+farm had already started, and tomorrow's review may want it. The harness scores
+one night and cannot see that bill. Judged over a week rather than a night, this
+column is the one that would move against the product.
+
+### Methodology
+
+**Workload.** One night is 16 generated shots — 2–6 frames each, drawn from the
+three measured cost classes, 6 of them required by the review, a quarter of the
+rest already cut by the director. Shot priority correlates with being required
+but is not identical to it, because priority is a standing property of a shot
+and "required tonight" is a property of tonight's review; a workload where the
+two coincided would make the priority-only arm look artificially bad. The
+deadline is 1.25× the required shots' final-quality work, so the review's own
+shots fit with headroom and everything else in the queue is what eats it. Five
+such nights are generated from fixed seeds and every arm faces all five.
+
+**Repeats.** §12 and §15 together say the noise lives between process launches,
+not between frames, so the harness repeats **whole runs**: 40 independent cost
+draws per night, 200 runs per arm. Each frame's duration is
+`measured mean × run multiplier × jitter`, where the multiplier is log-uniform
+with a max/min of exactly the 1.5× swing §12 recorded, drawn once per (run,
+shot) and shared across both quality tiers, and the jitter is the ±3.5% §15
+measured within a run. **Costs for both tiers of every frame are drawn before
+any scheduler runs**, so all three arms face identical luck and a downgrade does
+not roll fresh dice — comparing schedulers against different draws would be
+comparing luck. A seed reproduces a table exactly, pinned by
+`test_the_whole_table_reproduces_from_a_seed`.
+
+**Spread.** Mean ± sample standard deviation across the 200 runs, with min–max
+in brackets. Both, not one: the stdev is the honest summary and the range is
+what shows FIFO's best night beating CALLSHEET's worst on no metric at all.
+
+**The forecaster gets no oracle.** The CALLSHEET arm imports `forecast_all`,
+`rejected`/`surviving`, `apply_actions` and `verify` and drives them unchanged —
+if it reimplemented the forecaster the ablation would measure the benchmark. It
+sees only what the product sees: `frames_done` from the queue, and per-frame
+means from frames that have already finished tonight, backed by the previous
+nights' measured rates. It never sees the cost table. It re-plans every 30
+simulated seconds, the same cadence as the board (§16).
+
+### What this is not
+
+**It does not benchmark Gemini.** §16 established the free tier at 20 requests
+per day, so 600 runs cannot call the model and this harness does not pretend to.
+`bench` never imports `decide` — enforced by an AST check in
+`test_the_harness_never_calls_the_language_model`, not by a promise in prose.
+The sacrifice is chosen by a deterministic rule that takes cut shots first, then
+lowest priority, and stops when `verify` says the gap has closed. **That is the
+easy half of the problem.** The model's real job — weighing two sacrifices that
+both close the gap but cost the production different things — is not exercised
+and not claimed. This measures the scheduling policy the agent operates within.
+
+**Two more places a hostile reading lands, stated rather than left to be found:**
+
+- The **cut-shots column flatters CALLSHEET**. A static scheduler that simply
+  skipped shots on the cut list would score near zero there with no agent, no
+  forecaster and no telemetry. The claim rests on the first two columns.
+- The **baselines never react, by construction**. That is what an ablation of a
+  reactive policy has to compare against, but it means the headline gap measures
+  "reacting versus not reacting" and not "reacting well".
+
+### Where CALLSHEET does not win
+
+Set every shot required and the deadline out of reach (`--required-fraction 1.0
+--slack 0.85`) and the advantage vanishes completely:
+
+| Scheduler | Required delivered | Escalations |
+|---|---|---|
+| FIFO | 13.03 ± 0.86 | 0.00 |
+| **Priority-only** | **13.91 ± 0.81** | 0.00 |
+| CALLSHEET | 13.03 ± 0.86 | 17.01 ± 2.28 |
+
+**CALLSHEET ties FIFO exactly and loses to priority-only.** With nothing
+sacrificeable it correctly declines to act — no downgrade closes any gap, so
+taking one would trade quality for nothing (§14: 1.08× on a cheap shot) — and
+escalates seventeen times a night instead. Meanwhile priority-only wins on a
+lever CALLSHEET does not have: **reordering the queue.** `apply_actions` can
+preempt and downgrade; it cannot resequence. On a night where every shot must
+ship, resequencing is the only move there is.
+
+That is a real gap in the product and the honest reading of it is that
+CALLSHEET's advantage comes entirely from having something to give up. It is
+pinned by `test_the_advantage_disappears_when_there_is_nothing_to_sacrifice` so
+it cannot quietly stop being true. Adding a reorder action is the obvious next
+lever, and it is deliberately *not* being added before the deadline: shipping it
+untested to make a table look better is how a benchmark stops being evidence.
+
+The result is robust to the deadline, which was the other thing worth checking
+before believing it. Sweeping `--slack` from 0.90 to 1.50 moves every arm and
+changes no ordering: CALLSHEET delivers 5.14–6.00 of 6 across the range while
+FIFO moves 1.60→3.46 and priority-only 2.77→4.35. The tightest setting is where
+CALLSHEET is weakest in absolute terms and strongest in relative terms, which is
+the shape a deadline-aware scheduler ought to have.
+
+This is still the one thing no other entrant on this track is likely to have. It
 carries Technological Implementation and Potential Impact together, and it is
 the lesson carried over from Tribunal: a measured result plus a legible demo is
-very hard to beat.
+very hard to beat. The reported loss is part of that, not a blemish on it — a
+benchmark whose author already knew the answer is not evidence.
 
 ## 7. Failure handling
 
